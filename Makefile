@@ -1,4 +1,4 @@
-GOPATH=$(pwd)/_vendor:$GOPATH
+GOPATH=$(CURDIR)/_vendor:$GOPATH
 
 all:
 	go build .
