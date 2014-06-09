@@ -13,9 +13,10 @@ func testGetJobID(resp http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(resp, "Hello, %s", reqVars["jobID"])
 }
 
-func setupRouter() *http.ServeMux {
+func setupRouter() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/{jobID}", testGetJobID).Methods("GET")
+	return r
 }
 
 // ServeHTTP sets up the routes and serves HTTP requests. It blocks forever, so
@@ -26,5 +27,5 @@ func ServeHTTP() {
 		Addr:    ":8080",
 		Handler: m,
 	}
-	log.Fatal(s.ListenAndServe)
+	log.Fatal(s.ListenAndServe())
 }

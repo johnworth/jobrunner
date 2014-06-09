@@ -30,5 +30,5 @@ func main() {
 		fmt.Println(string(output[:]))
 	}
 	fmt.Println(<-js.ExitCode)
-	serveHTTP()
+	ServeHTTP()
 }
