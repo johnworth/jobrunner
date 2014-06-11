@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
-	"strings"
 	"syscall"
 )
 
@@ -60,7 +59,6 @@ func (j *JobOutputRegistry) Listen() {
 			case rem := <-j.Remove:
 				delete(j.Registry, rem)
 				rem.Latch <- 1
-			default:
 			}
 		}
 	}()
@@ -168,7 +166,6 @@ func (j *JobRegistry) Listen() {
 				s.Latch <- 1
 			case g := <-j.Getter:
 				g.Resp <- j.Registry[g.Key]
-			default:
 			}
 		}
 	}()
@@ -225,10 +222,9 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 		cmdString := <-s.Command
 		environment := <-s.Environment
 		log.Println(environment)
-		cmdSections := strings.Split(cmdString, " ")
-		cmdName := cmdSections[0]
-		cmdArgs := strings.Join(cmdSections[1:], " ")
-		cmd := exec.Command(cmdName, cmdArgs)
+		cmd := exec.Command("bash", "-c", cmdString)
+		cmd.Env = formatEnv(environment)
+		fmt.Println(cmd.Env)
 		cmd.Stdout = s
 		cmd.Stderr = s
 		<-s.Start
@@ -247,4 +243,12 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 		}
 		s.ExitCode <- exitCode(cmd)
 	}()
+}
+
+func formatEnv(env map[string]string) []string {
+	output := make([]string, 1)
+	for key, val := range env {
+		output = append(output, fmt.Sprintf("%s=%s", key, val))
+	}
+	return output
 }
