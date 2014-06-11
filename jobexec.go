@@ -114,7 +114,6 @@ func NewJobSyncer() *JobSyncer {
 
 // Write sends the []byte array passed out on RoutineWriter's OutChannel
 func (j *JobSyncer) Write(p []byte) (n int, err error) {
-	fmt.Println(string(p[:]))
 	j.OutputRegistry.Input <- p
 	return len(p), nil
 }
@@ -206,8 +205,7 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 	syncer := NewJobSyncer()
 	jobID := "foo"
 	j.Registry.RegisterJobSyncer(jobID, syncer)
-
-	//Set up the output listener
+	logger(syncer.OutputRegistry.AddListener().Listener)
 	j.Execute(syncer)
 	syncer.Command <- command
 	syncer.Environment <- environment
@@ -228,7 +226,6 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 		cmd.Stdout = s
 		cmd.Stderr = s
 		<-s.Start
-		fmt.Println("Starting")
 		err := cmd.Start()
 		if err != nil {
 			fmt.Println(err)
@@ -251,4 +248,15 @@ func formatEnv(env map[string]string) []string {
 		output = append(output, fmt.Sprintf("%s=%s", key, val))
 	}
 	return output
+}
+
+func logger(in <-chan []byte) {
+	go func() {
+		for {
+			select {
+			case msg := <-in:
+				fmt.Print(string(msg[:]))
+			}
+		}
+	}()
 }
