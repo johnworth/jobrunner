@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -13,6 +13,13 @@ func exitCode(cmd *exec.Cmd) int {
 	return cmd.ProcessState.Sys().(syscall.WaitStatus).ExitStatus()
 }
 
+// JobOutputQuitMsg is sent to the JobOutputRegistry on the Quit channel when
+// a job completes. The JobOutputRegistry then tells all of the registered
+// JobOutputListeners to quit.
+type JobOutputQuitMsg struct {
+	Latch chan int
+}
+
 // JobOutputListener is the message struct for the Setter and Remove channels
 // in a JobOutputRegistry instance. The Listener is the channel that job outputs
 // are sent out on. The Latch channel is used for synchronizing the
@@ -20,6 +27,7 @@ func exitCode(cmd *exec.Cmd) int {
 type JobOutputListener struct {
 	Listener chan []byte
 	Latch    chan int
+	Quit     chan int
 }
 
 // JobOutputRegistry contains a list of channels that accept []byte's. Each job
@@ -31,6 +39,7 @@ type JobOutputRegistry struct {
 	Setter   chan *JobOutputListener
 	Remove   chan *JobOutputListener
 	Registry map[*JobOutputListener]chan []byte
+	Quit     chan *JobOutputQuitMsg
 }
 
 // NewJobOutputRegistry returns a pointer to a new instance of JobOutputRegistry.
@@ -40,6 +49,7 @@ func NewJobOutputRegistry() *JobOutputRegistry {
 		Setter:   make(chan *JobOutputListener),
 		Remove:   make(chan *JobOutputListener),
 		Registry: make(map[*JobOutputListener]chan []byte),
+		Quit:     make(chan *JobOutputQuitMsg),
 	}
 }
 
@@ -59,6 +69,13 @@ func (j *JobOutputRegistry) Listen() {
 			case rem := <-j.Remove:
 				delete(j.Registry, rem)
 				rem.Latch <- 1
+			case q := <-j.Quit:
+				for l := range j.Registry {
+					l.Quit <- 1
+				}
+				q.Latch <- 1
+				os.Stdout.Sync()
+				break
 			}
 		}
 	}()
@@ -73,6 +90,7 @@ func (j *JobOutputRegistry) AddListener() *JobOutputListener {
 	adder := &JobOutputListener{
 		Listener: listener,
 		Latch:    latch,
+		Quit:     make(chan int),
 	}
 	j.Setter <- adder
 	<-latch
@@ -116,6 +134,15 @@ func NewJobSyncer() *JobSyncer {
 func (j *JobSyncer) Write(p []byte) (n int, err error) {
 	j.OutputRegistry.Input <- p
 	return len(p), nil
+}
+
+// Quit tells the JobSyncer to clean up its OutputRegistry
+func (j *JobSyncer) Quit() {
+	l := make(chan int)
+	j.OutputRegistry.Quit <- &JobOutputQuitMsg{
+		Latch: l,
+	}
+	<-l
 }
 
 // JobRegistryGetMsg wraps a key that you want to retrieve from a JobRegistry
@@ -205,7 +232,7 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 	syncer := NewJobSyncer()
 	jobID := "foo"
 	j.Registry.RegisterJobSyncer(jobID, syncer)
-	logger(syncer.OutputRegistry.AddListener().Listener)
+	logger(syncer.OutputRegistry.AddListener())
 	j.Execute(syncer)
 	syncer.Command <- command
 	syncer.Environment <- environment
@@ -219,10 +246,8 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 	go func() {
 		cmdString := <-s.Command
 		environment := <-s.Environment
-		log.Println(environment)
 		cmd := exec.Command("bash", "-c", cmdString)
 		cmd.Env = formatEnv(environment)
-		fmt.Println(cmd.Env)
 		cmd.Stdout = s
 		cmd.Stderr = s
 		<-s.Start
@@ -230,15 +255,19 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 		if err != nil {
 			fmt.Println(err)
 			s.ExitCode <- -1000
+			s.Quit()
 			return
 		}
 		err = cmd.Wait()
 		if err != nil {
 			fmt.Println(err)
 			s.ExitCode <- -2000
+			s.Quit()
 			return
 		}
-		s.ExitCode <- exitCode(cmd)
+
+		//s.ExitCode <- exitCode(cmd)
+		s.Quit()
 	}()
 }
 
@@ -250,12 +279,14 @@ func formatEnv(env map[string]string) []string {
 	return output
 }
 
-func logger(in <-chan []byte) {
+func logger(l *JobOutputListener) {
 	go func() {
 		for {
 			select {
-			case msg := <-in:
+			case msg := <-l.Listener:
 				fmt.Print(string(msg[:]))
+			case <-l.Quit:
+				break
 			}
 		}
 	}()
