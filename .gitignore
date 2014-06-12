@@ -1,2 +1,4 @@
 jobrunner
 .env
+**/pkg
+**/.hg
