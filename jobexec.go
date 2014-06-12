@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 
 	"code.google.com/p/go-uuid/uuid"
@@ -27,9 +29,91 @@ type JobOutputQuitMsg struct {
 // are sent out on. The Latch channel is used for synchronizing the
 // AddListener() and RemoveListener() calls.
 type JobOutputListener struct {
-	Listener chan []byte
-	Latch    chan int
-	Quit     chan int
+	Listener   chan []byte
+	Latch      chan int
+	Quit       chan int
+	readBuffer []byte
+}
+
+// JobOutputReader will buffer and allow Read()s from data sent via a
+// JobOutputListener
+type JobOutputReader struct {
+	accum       []byte
+	listener    *JobOutputListener
+	m           *sync.Mutex
+	QuitChannel chan int
+	EOF         bool
+}
+
+// NewJobOutputReader will create a new JobOutputReader with the given
+// JobOutputListener.
+func NewJobOutputReader(l *JobOutputListener) *JobOutputReader {
+	r := &JobOutputReader{
+		accum:       make([]byte, 0),
+		listener:    l,
+		m:           &sync.Mutex{},
+		QuitChannel: make(chan int),
+		EOF:         false,
+	}
+	go func() {
+		for {
+			select {
+			case inBytes := <-r.listener.Listener:
+				r.m.Lock()
+				for _, b := range inBytes {
+					r.accum = append(r.accum, b)
+				}
+				r.m.Unlock()
+			case <-r.listener.Quit: //Quit if the listener tells us to.
+				r.m.Lock()
+				r.EOF = true
+				r.m.Unlock()
+				fmt.Println("Quitting reader")
+				break
+			case <-r.QuitChannel: //Quit if a caller tells us to.
+				r.m.Lock()
+				r.EOF = true
+				r.m.Unlock()
+				fmt.Println("Quitting reader")
+				break
+			}
+		}
+	}()
+	return r
+}
+
+// Reader will do a consuming read from the JobOutputReader's buffer. This makes
+// it implement the Reader interface.
+func (r *JobOutputReader) Read(p []byte) (n int, err error) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	if r.EOF && len(r.accum) == 0 {
+		return 0, io.EOF
+	}
+	if len(r.accum) == 0 {
+		return 0, nil
+	}
+	var bytesRead int
+	if len(r.accum) <= len(p) {
+		bytesRead = copy(p, r.accum)
+		r.accum = make([]byte, 0)
+		if r.EOF {
+			return bytesRead, io.EOF
+		}
+		return bytesRead, nil
+	}
+	//len(l.accum) > len(p)
+	bytesRead = copy(p, r.accum)
+	r.accum = r.accum[:bytesRead]
+	//the accumulated buffer is longer than the requested read, so
+	//there's no need to check for EOF here.
+	return bytesRead, nil
+
+}
+
+// Quit will tell the goroutine that pushes data into the buffer to quit.
+func (r *JobOutputReader) Quit() {
+	r.QuitChannel <- 1
 }
 
 // JobOutputRegistry contains a list of channels that accept []byte's. Each job
@@ -90,9 +174,10 @@ func (j *JobOutputRegistry) AddListener() *JobOutputListener {
 	listener := make(chan []byte)
 	latch := make(chan int)
 	adder := &JobOutputListener{
-		Listener: listener,
-		Latch:    latch,
-		Quit:     make(chan int),
+		Listener:   listener,
+		Latch:      latch,
+		Quit:       make(chan int),
+		readBuffer: make([]byte, 0),
 	}
 	j.Setter <- adder
 	<-latch
@@ -151,7 +236,7 @@ func (j *JobSyncer) Quit() {
 // and a Resp channel that the retrieved value should be sent back on.
 type JobRegistryGetMsg struct {
 	Key  string
-	Resp chan<- *JobSyncer
+	Resp chan *JobSyncer
 }
 
 // JobRegistrySetMsg wraps a key that you want to set, the Value (a *JobSyncer)
@@ -211,6 +296,16 @@ func (j *JobRegistry) RegisterJobSyncer(uuid string, s *JobSyncer) {
 	<-m.Latch
 }
 
+// Get looks up the job for the given uuid in the registry.
+func (j *JobRegistry) Get(uuid string) *JobSyncer {
+	getMsg := &JobRegistryGetMsg{
+		Key:  uuid,
+		Resp: make(chan *JobSyncer),
+	}
+	j.Getter <- getMsg
+	return <-getMsg.Resp
+}
+
 // JobExecutor maintains a reference to a JobRegistry and is able to launch
 // jobs. There should only be one instance of JobExecutor per instance of
 // jobrunner, but there isn't anything to prevent you from creating more than
@@ -241,7 +336,7 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 	}()
 	jobID := uuid.New()
 	j.Registry.RegisterJobSyncer(jobID, syncer)
-	logger(syncer.OutputRegistry.AddListener())
+	//logger(syncer.OutputRegistry.AddListener())
 	j.Execute(syncer)
 	syncer.Command <- command
 	syncer.Environment <- environment

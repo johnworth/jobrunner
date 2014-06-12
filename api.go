@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 
@@ -42,7 +43,6 @@ func (h *APIHandlers) StartJob(resp http.ResponseWriter, r *http.Request) {
 		http.Error(resp, err.Error(), 500)
 		return
 	}
-	log.Printf("startJob(): %s", jobMsg)
 	if jobMsg.CommandLine == "" {
 		http.Error(resp, "Missing CommandLine key.", 500)
 		return
@@ -78,7 +78,12 @@ func (h *APIHandlers) ListJobs(resp http.ResponseWriter, r *http.Request) {
 // as a chunked response.
 func (h *APIHandlers) AttachToJob(resp http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	fmt.Fprintf(resp, "attachToJob: %s\n", vars["runID"])
+	runID := vars["runID"]
+	syncer := h.Executor.Registry.Get(runID)
+	outputListener := syncer.OutputRegistry.AddListener()
+	reader := NewJobOutputReader(outputListener)
+	defer reader.Quit()
+	io.Copy(resp, reader)
 }
 
 // SetupRouter uses Gorilla's mux project to set up a router and returns it.
