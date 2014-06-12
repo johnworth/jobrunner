@@ -83,6 +83,7 @@ func (h *APIHandlers) AttachToJob(resp http.ResponseWriter, r *http.Request) {
 	outputListener := syncer.OutputRegistry.AddListener()
 	reader := NewJobOutputReader(outputListener)
 	defer reader.Quit()
+	defer syncer.OutputRegistry.RemoveListener(outputListener)
 	io.Copy(resp, reader)
 }
 
