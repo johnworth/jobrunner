@@ -69,9 +69,21 @@ func (h *APIHandlers) GetJobInfo(resp http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(resp, "getJobInfo: %s\n", vars["jobID"])
 }
 
+// ListJobsResponse represents a the return value for the ListJobs endpoint.
+type ListJobsResponse struct {
+	JobIDs []string
+}
+
 // ListJobs returns a list of all of the running jobs.
 func (h *APIHandlers) ListJobs(resp http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(resp, "listJobs\n")
+	jobs, err := json.Marshal(&ListJobsResponse{
+		JobIDs: h.Executor.Registry.ListJobs(),
+	})
+	if err != nil {
+		http.Error(resp, err.Error(), 500)
+		return
+	}
+	fmt.Fprintf(resp, string(jobs[:]))
 }
 
 // AttachToJob streams a combined stdout/stderr for a running job

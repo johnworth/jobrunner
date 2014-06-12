@@ -244,6 +244,12 @@ type JobRegistrySetMsg struct {
 	Latch chan int
 }
 
+// JobRegistryListMsg is the struct that job UUIDs are returned in by the
+// JobRegistry.
+type JobRegistryListMsg struct {
+	Jobs chan []string
+}
+
 // JobRegistry encapsulates a map associating a string with a *JobSyncer. This
 // will let additional goroutines communicate with the goroutine running the
 // job associated with the key. The key will most likely be a UUID. There should
@@ -251,6 +257,8 @@ type JobRegistrySetMsg struct {
 type JobRegistry struct {
 	Setter   chan *JobRegistrySetMsg
 	Getter   chan *JobRegistryGetMsg
+	Remove   chan *JobSyncer
+	Lister   chan *JobRegistryListMsg
 	Registry map[string]*JobSyncer
 }
 
@@ -260,6 +268,8 @@ func NewJobRegistry() *JobRegistry {
 	return &JobRegistry{
 		Setter:   make(chan *JobRegistrySetMsg),
 		Getter:   make(chan *JobRegistryGetMsg),
+		Remove:   make(chan *JobSyncer),
+		Lister:   make(chan *JobRegistryListMsg),
 		Registry: make(map[string]*JobSyncer),
 	}
 }
@@ -275,6 +285,18 @@ func (j *JobRegistry) Listen() {
 				s.Latch <- 1
 			case g := <-j.Getter:
 				g.Resp <- j.Registry[g.Key]
+			case rem := <-j.Remove:
+				for k, v := range j.Registry {
+					if v == rem {
+						delete(j.Registry, k)
+					}
+				}
+			case lister := <-j.Lister:
+				var keys []string
+				for k := range j.Registry {
+					keys = append(keys, k)
+				}
+				lister.Jobs <- keys
 			}
 		}
 	}()
@@ -302,6 +324,7 @@ func (j *JobRegistry) Get(uuid string) *JobSyncer {
 	return <-getMsg.Resp
 }
 
+// HasKey returns true if a job associated with uuid is running, false otherwise.
 func (j *JobRegistry) HasKey(uuid string) bool {
 	getMsg := &JobRegistryGetMsg{
 		Key:  uuid,
@@ -313,6 +336,19 @@ func (j *JobRegistry) HasKey(uuid string) bool {
 		return false
 	}
 	return true
+}
+
+// ListJobs returns the list of jobs from the registry.
+func (j *JobRegistry) ListJobs() []string {
+	lister := &JobRegistryListMsg{
+		Jobs: make(chan []string),
+	}
+	j.Lister <- lister
+	retval := <-lister.Jobs
+	if retval == nil {
+		return make([]string, 0)
+	}
+	return retval
 }
 
 // JobExecutor maintains a reference to a JobRegistry and is able to launch
@@ -377,6 +413,7 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 			return
 		}
 		s.ExitCode <- exitCode(cmd)
+		j.Registry.Remove <- s
 	}()
 }
 
