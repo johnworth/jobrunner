@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -68,13 +67,11 @@ func NewJobOutputReader(l *JobOutputListener) *JobOutputReader {
 				r.m.Lock()
 				r.EOF = true
 				r.m.Unlock()
-				fmt.Println("Quitting reader")
 				break
 			case <-r.QuitChannel: //Quit if a caller tells us to.
 				r.m.Lock()
 				r.EOF = true
 				r.m.Unlock()
-				fmt.Println("Quitting reader")
 				break
 			}
 		}
@@ -160,7 +157,6 @@ func (j *JobOutputRegistry) Listen() {
 					l.Quit <- 1
 				}
 				q.Latch <- 1
-				os.Stdout.Sync()
 				break
 			}
 		}
@@ -306,6 +302,19 @@ func (j *JobRegistry) Get(uuid string) *JobSyncer {
 	return <-getMsg.Resp
 }
 
+func (j *JobRegistry) HasKey(uuid string) bool {
+	getMsg := &JobRegistryGetMsg{
+		Key:  uuid,
+		Resp: make(chan *JobSyncer),
+	}
+	j.Getter <- getMsg
+	r := <-getMsg.Resp
+	if r == nil {
+		return false
+	}
+	return true
+}
+
 // JobExecutor maintains a reference to a JobRegistry and is able to launch
 // jobs. There should only be one instance of JobExecutor per instance of
 // jobrunner, but there isn't anything to prevent you from creating more than
@@ -336,7 +345,6 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 	}()
 	jobID := uuid.New()
 	j.Registry.RegisterJobSyncer(jobID, syncer)
-	//logger(syncer.OutputRegistry.AddListener())
 	j.Execute(syncer)
 	syncer.Command <- command
 	syncer.Environment <- environment
@@ -348,6 +356,7 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 // eventually execute a job.
 func (j *JobExecutor) Execute(s *JobSyncer) {
 	go func() {
+		defer s.Quit()
 		cmdString := <-s.Command
 		environment := <-s.Environment
 		cmd := exec.Command("bash", "-c", cmdString)
@@ -359,18 +368,15 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 		if err != nil {
 			fmt.Println(err)
 			s.ExitCode <- -1000
-			s.Quit()
 			return
 		}
 		err = cmd.Wait()
 		if err != nil {
 			fmt.Println(err)
 			s.ExitCode <- -2000
-			s.Quit()
 			return
 		}
 		s.ExitCode <- exitCode(cmd)
-		s.Quit()
 	}()
 }
 
@@ -380,17 +386,4 @@ func formatEnv(env map[string]string) []string {
 		output = append(output, fmt.Sprintf("%s=%s", key, val))
 	}
 	return output
-}
-
-func logger(l *JobOutputListener) {
-	go func() {
-		for {
-			select {
-			case msg := <-l.Listener:
-				fmt.Print(string(msg[:]))
-			case <-l.Quit:
-				break
-			}
-		}
-	}()
 }

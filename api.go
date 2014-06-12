@@ -79,7 +79,12 @@ func (h *APIHandlers) ListJobs(resp http.ResponseWriter, r *http.Request) {
 func (h *APIHandlers) AttachToJob(resp http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	runID := vars["runID"]
-	syncer := h.Executor.Registry.Get(runID)
+	jobRegistry := h.Executor.Registry
+	if !jobRegistry.HasKey(runID) {
+		http.Error(resp, fmt.Sprintf("Job %s not found.", runID), 404)
+		return
+	}
+	syncer := jobRegistry.Get(runID)
 	outputListener := syncer.OutputRegistry.AddListener()
 	reader := NewJobOutputReader(outputListener)
 	defer reader.Quit()
