@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+
+	"code.google.com/p/go-uuid/uuid"
 )
 
 // exitCode returns the integer exit code of a command. Start() and Wait()
@@ -237,7 +239,7 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 			fmt.Println(e)
 		}
 	}()
-	jobID := "foo"
+	jobID := uuid.New()
 	j.Registry.RegisterJobSyncer(jobID, syncer)
 	logger(syncer.OutputRegistry.AddListener())
 	j.Execute(syncer)
