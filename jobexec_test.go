@@ -267,3 +267,113 @@ func TestJobOutputRegistryInput2(t *testing.T) {
 	}
 
 }
+
+func TestJobSyncerWrite(t *testing.T) {
+	s := NewJobSyncer()
+	r := s.OutputRegistry
+	l1 := r.AddListener()
+	l2 := r.AddListener()
+	testbytes := []byte("testing")
+	s.Write(testbytes)
+	var recv1 []byte
+	var recv2 []byte
+	for {
+		select {
+		case recv1 = <-l1.Listener:
+			close(l1.Listener)
+			l1.Listener = nil
+		case recv2 = <-l2.Listener:
+			close(l2.Listener)
+			l2.Listener = nil
+		}
+		if l1.Listener == nil && l2.Listener == nil {
+			break
+		}
+	}
+	if !reflect.DeepEqual(recv1, testbytes) {
+		t.Fail()
+	}
+	if !reflect.DeepEqual(recv2, testbytes) {
+		t.Fail()
+	}
+}
+
+func TestJobRegistryRegister(t *testing.T) {
+	r := NewJobRegistry()
+	r.Listen()
+	s := NewJobSyncer()
+	r.Register("testing", s)
+	foundsyncer := false
+	for k, v := range r.Registry {
+		if k == "testing" && v == s {
+			foundsyncer = true
+		}
+	}
+	if !foundsyncer {
+		t.Fail()
+	}
+}
+
+func TestJobRegistryGet(t *testing.T) {
+	r := NewJobRegistry()
+	r.Listen()
+	s := NewJobSyncer()
+	r.Register("testing", s)
+	get := r.Get("testing")
+	if get != s {
+		t.Fail()
+	}
+}
+
+func TestJobRegistryHasKey(t *testing.T) {
+	r := NewJobRegistry()
+	r.Listen()
+	s := NewJobSyncer()
+	r.Register("testing", s)
+	if !r.HasKey("testing") {
+		t.Fail()
+	}
+	if r.HasKey("testing2") {
+		t.Fail()
+	}
+}
+
+func TestJobRegistryDelete(t *testing.T) {
+	r := NewJobRegistry()
+	r.Listen()
+	s := NewJobSyncer()
+	r.Register("testing", s)
+	r.Delete(s)
+	if r.HasKey("testing") {
+		t.Fail()
+	}
+}
+
+func TestJobRegistryListJobs(t *testing.T) {
+	r := NewJobRegistry()
+	r.Listen()
+	s := NewJobSyncer()
+	r.Register("testing", s)
+	r.Register("testing2", s)
+	r.Register("testing3", s)
+	list := r.ListJobs()
+	found1 := false
+	found2 := false
+	found3 := false
+	for _, v := range list {
+		if v == "testing" {
+			found1 = true
+		}
+		if v == "testing2" {
+			found2 = true
+		}
+		if v == "testing3" {
+			found3 = true
+		}
+	}
+
+	if !found1 || !found2 || !found3 {
+		t.Fail()
+	}
+
+}
