@@ -268,6 +268,12 @@ type JobRegistryListMsg struct {
 	Jobs chan []string
 }
 
+// JobRegistryRemoveMsg is the struct used to remove JobSyncers from the registry.
+type JobRegistryRemoveMsg struct {
+	Syncer *JobSyncer
+	Latch  chan int
+}
+
 // JobRegistry encapsulates a map associating a string with a *JobSyncer. This
 // will let additional goroutines communicate with the goroutine running the
 // job associated with the key. The key will most likely be a UUID. There should
@@ -275,7 +281,7 @@ type JobRegistryListMsg struct {
 type JobRegistry struct {
 	Setter   chan *JobRegistrySetMsg
 	Getter   chan *JobRegistryGetMsg
-	Remove   chan *JobSyncer
+	Remove   chan *JobRegistryRemoveMsg
 	Lister   chan *JobRegistryListMsg
 	Registry map[string]*JobSyncer
 }
@@ -286,7 +292,7 @@ func NewJobRegistry() *JobRegistry {
 	return &JobRegistry{
 		Setter:   make(chan *JobRegistrySetMsg),
 		Getter:   make(chan *JobRegistryGetMsg),
-		Remove:   make(chan *JobSyncer),
+		Remove:   make(chan *JobRegistryRemoveMsg),
 		Lister:   make(chan *JobRegistryListMsg),
 		Registry: make(map[string]*JobSyncer),
 	}
@@ -305,9 +311,10 @@ func (j *JobRegistry) Listen() {
 				g.Resp <- j.Registry[g.Key]
 			case rem := <-j.Remove:
 				for k, v := range j.Registry {
-					if v == rem {
+					if v == rem.Syncer {
 						delete(j.Registry, k)
 					}
+					rem.Latch <- 1
 				}
 			case lister := <-j.Lister:
 				var keys []string
@@ -320,9 +327,9 @@ func (j *JobRegistry) Listen() {
 	}()
 }
 
-// RegisterJobSyncer adds the *JobSyncer to the registry with the key set to the
+// Register adds the *JobSyncer to the registry with the key set to the
 // value of uuid.
-func (j *JobRegistry) RegisterJobSyncer(uuid string, s *JobSyncer) {
+func (j *JobRegistry) Register(uuid string, s *JobSyncer) {
 	m := &JobRegistrySetMsg{
 		Key:   uuid,
 		Value: s,
@@ -369,6 +376,16 @@ func (j *JobRegistry) ListJobs() []string {
 	return retval
 }
 
+// Delete deletes a *JobSyncer from the registry.
+func (j *JobRegistry) Delete(s *JobSyncer) {
+	msg := &JobRegistryRemoveMsg{
+		Syncer: s,
+		Latch:  make(chan int),
+	}
+	j.Remove <- msg
+	<-msg.Latch
+}
+
 // JobExecutor maintains a reference to a JobRegistry and is able to launch
 // jobs. There should only be one instance of JobExecutor per instance of
 // jobrunner, but there isn't anything to prevent you from creating more than
@@ -398,7 +415,7 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 		}
 	}()
 	jobID := uuid.New()
-	j.Registry.RegisterJobSyncer(jobID, syncer)
+	j.Registry.Register(jobID, syncer)
 	j.Execute(syncer)
 	syncer.Command <- command
 	syncer.Environment <- environment
@@ -431,7 +448,7 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 			return
 		}
 		s.ExitCode <- exitCode(cmd)
-		j.Registry.Remove <- s
+		j.Registry.Delete(s)
 	}()
 }
 
