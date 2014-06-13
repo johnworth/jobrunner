@@ -193,3 +193,77 @@ func TestJobOutputReaderRead7(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestJobOutputRegistryListenSetter(t *testing.T) {
+	r := NewJobOutputRegistry()
+	r.Listen()
+	l := r.AddListener()
+	foundlistener := false
+	for p := range r.Registry {
+		if p == l {
+			foundlistener = true
+		}
+	}
+	if !foundlistener {
+		t.Fail()
+	}
+}
+
+func TestJobOutputRegistryRemove(t *testing.T) {
+	r := NewJobOutputRegistry()
+	r.Listen()
+	l := r.AddListener()
+	r.RemoveListener(l)
+	foundlistener := false
+	for p := range r.Registry {
+		if p == l {
+			foundlistener = true
+		}
+	}
+	if foundlistener {
+		t.Fail()
+	}
+}
+
+func TestJobOutputRegistryInput(t *testing.T) {
+	r := NewJobOutputRegistry()
+	r.Listen()
+	l := r.AddListener()
+	testbytes := []byte("testing")
+	r.Input <- testbytes
+	recv := <-l.Listener
+	if !reflect.DeepEqual(recv, testbytes) {
+		t.Fail()
+	}
+}
+
+func TestJobOutputRegistryInput2(t *testing.T) {
+	r := NewJobOutputRegistry()
+	r.Listen()
+	l1 := r.AddListener()
+	l2 := r.AddListener()
+	testbytes := []byte("testing")
+	r.Input <- testbytes
+	var recv1 []byte
+	var recv2 []byte
+	for {
+		select {
+		case recv1 = <-l1.Listener:
+			close(l1.Listener)
+			l1.Listener = nil
+		case recv2 = <-l2.Listener:
+			close(l2.Listener)
+			l2.Listener = nil
+		}
+		if l1.Listener == nil && l2.Listener == nil {
+			break
+		}
+	}
+	if !reflect.DeepEqual(recv1, testbytes) {
+		t.Fail()
+	}
+	if !reflect.DeepEqual(recv2, testbytes) {
+		t.Fail()
+	}
+
+}

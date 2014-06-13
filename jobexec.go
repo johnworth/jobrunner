@@ -34,6 +34,16 @@ type JobOutputListener struct {
 	readBuffer []byte
 }
 
+// NewJobOutputListener returns a new instance of JobOutputListener.
+func NewJobOutputListener() *JobOutputListener {
+	return &JobOutputListener{
+		Listener:   make(chan []byte),
+		Latch:      make(chan int),
+		Quit:       make(chan int),
+		readBuffer: make([]byte, 0),
+	}
+}
+
 // JobOutputReader will buffer and allow Read()s from data sent via a
 // JobOutputListener
 type JobOutputReader struct {
@@ -121,21 +131,21 @@ func (r *JobOutputReader) Quit() {
 // the job's JobSyncer instance, which in turn is referred to within the the
 // JobRegistry.
 type JobOutputRegistry struct {
-	Input    chan []byte
-	Setter   chan *JobOutputListener
-	Remove   chan *JobOutputListener
-	Registry map[*JobOutputListener]chan []byte
-	Quit     chan *JobOutputQuitMsg
+	Input       chan []byte
+	Setter      chan *JobOutputListener
+	Remove      chan *JobOutputListener
+	Registry    map[*JobOutputListener]chan []byte
+	QuitChannel chan *JobOutputQuitMsg
 }
 
 // NewJobOutputRegistry returns a pointer to a new instance of JobOutputRegistry.
 func NewJobOutputRegistry() *JobOutputRegistry {
 	return &JobOutputRegistry{
-		Input:    make(chan []byte),
-		Setter:   make(chan *JobOutputListener),
-		Remove:   make(chan *JobOutputListener),
-		Registry: make(map[*JobOutputListener]chan []byte),
-		Quit:     make(chan *JobOutputQuitMsg),
+		Input:       make(chan []byte),
+		Setter:      make(chan *JobOutputListener),
+		Remove:      make(chan *JobOutputListener),
+		Registry:    make(map[*JobOutputListener]chan []byte),
+		QuitChannel: make(chan *JobOutputQuitMsg),
 	}
 }
 
@@ -155,7 +165,7 @@ func (j *JobOutputRegistry) Listen() {
 			case rem := <-j.Remove:
 				delete(j.Registry, rem)
 				rem.Latch <- 1
-			case q := <-j.Quit:
+			case q := <-j.QuitChannel:
 				for l := range j.Registry {
 					l.Quit <- 1
 				}
@@ -191,6 +201,15 @@ func (j *JobOutputRegistry) RemoveListener(l *JobOutputListener) {
 	<-l.Latch
 }
 
+// Quit tells the JobOutputRegistry's goroutine to exit.
+func (j *JobOutputRegistry) Quit() {
+	msg := &JobOutputQuitMsg{
+		Latch: make(chan int),
+	}
+	j.QuitChannel <- msg
+	<-msg.Latch
+}
+
 // JobSyncer contains channels that can be used to communicate with a job
 // goroutine. It also contains a pointer to a JobOutputRegistry.
 type JobSyncer struct {
@@ -224,11 +243,7 @@ func (j *JobSyncer) Write(p []byte) (n int, err error) {
 
 // Quit tells the JobSyncer to clean up its OutputRegistry
 func (j *JobSyncer) Quit() {
-	l := make(chan int)
-	j.OutputRegistry.Quit <- &JobOutputQuitMsg{
-		Latch: l,
-	}
-	<-l
+	j.OutputRegistry.Quit()
 }
 
 // JobRegistryGetMsg wraps a key that you want to retrieve from a JobRegistry
