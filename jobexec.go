@@ -99,17 +99,20 @@ func (r *JobOutputReader) Read(p []byte) (n int, err error) {
 		}
 		return bytesRead, nil
 	}
-	//len(l.accum) > len(p)
 	bytesRead = copy(p, r.accum)
-	r.accum = r.accum[:bytesRead]
-	//the accumulated buffer is longer than the requested read, so
-	//there's no need to check for EOF here.
+	r.accum = r.accum[bytesRead:]
+	if r.EOF && (len(r.accum) <= 0) {
+		return bytesRead, io.EOF
+	}
 	return bytesRead, nil
 
 }
 
 // Quit will tell the goroutine that pushes data into the buffer to quit.
 func (r *JobOutputReader) Quit() {
+	r.m.Lock()
+	r.EOF = true
+	r.m.Unlock()
 	r.QuitChannel <- 1
 }
 
