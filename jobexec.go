@@ -216,6 +216,7 @@ type JobSyncer struct {
 	Command        chan string
 	Environment    chan map[string]string
 	Start          chan int
+	Kill           chan int
 	Output         chan []byte
 	ExitCode       chan int
 	OutputRegistry *JobOutputRegistry
@@ -227,6 +228,7 @@ func NewJobSyncer() *JobSyncer {
 		Command:        make(chan string),
 		Environment:    make(chan map[string]string),
 		Start:          make(chan int),
+		Kill:           make(chan int),
 		Output:         make(chan []byte),
 		ExitCode:       make(chan int),
 		OutputRegistry: NewJobOutputRegistry(),
@@ -428,28 +430,57 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 func (j *JobExecutor) Execute(s *JobSyncer) {
 	go func() {
 		defer s.Quit()
-		cmdString := <-s.Command
-		environment := <-s.Environment
-		cmd := exec.Command("bash", "-c", cmdString)
-		cmd.Env = formatEnv(environment)
-		cmd.Stdout = s
-		cmd.Stderr = s
-		<-s.Start
-		err := cmd.Start()
-		if err != nil {
-			fmt.Println(err)
-			s.ExitCode <- -1000
-			return
+		defer j.Registry.Delete(s)
+		shouldStart := false
+		running := false
+		var cmdString string
+		var environment map[string]string
+		var cmd *exec.Cmd
+
+		for {
+			select {
+			case cmdString = <-s.Command:
+			case environment = <-s.Environment:
+			case <-s.Start:
+				shouldStart = true
+			case <-s.Kill:
+				if running && cmd != nil {
+					cmd.Process.Kill()
+				}
+			}
+
+			if cmdString != "" && environment != nil && shouldStart && !running {
+				go func() {
+					cmd = exec.Command("bash", "-c", cmdString)
+					cmd.Env = formatEnv(environment)
+					cmd.Stdout = s
+					cmd.Stderr = s
+					err := cmd.Start()
+					if err != nil {
+						fmt.Println(err)
+						s.ExitCode <- -1000
+						return
+					}
+					err = cmd.Wait()
+					if err != nil {
+						fmt.Println(err)
+						s.ExitCode <- -2000
+						return
+					}
+					s.ExitCode <- exitCode(cmd)
+				}()
+				running = true
+			}
 		}
-		err = cmd.Wait()
-		if err != nil {
-			fmt.Println(err)
-			s.ExitCode <- -2000
-			return
-		}
-		s.ExitCode <- exitCode(cmd)
-		j.Registry.Delete(s)
 	}()
+}
+
+// Kill terminates the specified job with extreme prejudice.
+func (j *JobExecutor) Kill(uuid string) {
+	if j.Registry.HasKey(uuid) {
+		syncer := j.Registry.Get(uuid)
+		syncer.Kill <- 1
+	}
 }
 
 func formatEnv(env map[string]string) []string {
