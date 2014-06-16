@@ -377,3 +377,30 @@ func TestJobRegistryListJobs(t *testing.T) {
 	}
 
 }
+
+func TestJobExecutorLaunch(t *testing.T) {
+	r := NewJobExecutor()
+	jobid := r.Launch("echo foo", make(map[string]string))
+	if jobid == "" {
+		t.Fail()
+	}
+}
+
+func TestJobExecutorExecute(t *testing.T) {
+	e := NewJobExecutor()
+	s := NewJobSyncer()
+	ec := make(chan int)
+	go func() {
+		retval := <-s.ExitCode
+		ec <- retval
+	}()
+	e.Execute(s)
+	e.Registry.Register("blippy", s)
+	s.Command <- "echo $FOO"
+	s.Environment <- map[string]string{"FOO": "BAR"}
+	s.Start <- 1
+	exit := <-ec
+	if exit != 0 {
+		t.Fail()
+	}
+}
