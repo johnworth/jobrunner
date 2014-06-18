@@ -16,34 +16,34 @@ func TestExitCode(t *testing.T) {
 	}
 }
 
-func getJobOutputReader() *JobOutputReader {
-	jol := &JobOutputListener{
+func getOutputReader() *OutputReader {
+	jol := &OutputListener{
 		Listener:   make(chan []byte),
 		Latch:      make(chan int),
 		Quit:       make(chan int),
 		readBuffer: make([]byte, 0),
 	}
-	return NewJobOutputReader(jol)
+	return NewOutputReader(jol)
 }
 
-func TestJobOutputReaderQuitChannel(t *testing.T) {
-	r := getJobOutputReader()
+func TestOutputReaderQuitChannel(t *testing.T) {
+	r := getOutputReader()
 	r.Quit()
 	if !r.EOF {
 		t.Fail()
 	}
 }
 
-func TestJobOutputReaderListernQuit(t *testing.T) {
-	r := getJobOutputReader()
+func TestOutputReaderListernQuit(t *testing.T) {
+	r := getOutputReader()
 	r.listener.Quit <- 1
 	if !r.EOF {
 		t.Fail()
 	}
 }
 
-func TestJobOutputReaderSendBytes(t *testing.T) {
-	r := getJobOutputReader()
+func TestOutputReaderSendBytes(t *testing.T) {
+	r := getOutputReader()
 	testBytes := []byte("testing")
 	r.listener.Listener <- testBytes
 	if !reflect.DeepEqual(r.accum, testBytes) {
@@ -52,10 +52,10 @@ func TestJobOutputReaderSendBytes(t *testing.T) {
 	r.Quit()
 }
 
-// TestJobOutputReaderRead1 tests a Read with a buffer the same size as the
+// TestOutputReaderRead1 tests a Read with a buffer the same size as the
 // test value.
-func TestJobOutputReaderRead1(t *testing.T) {
-	r := getJobOutputReader()
+func TestOutputReaderRead1(t *testing.T) {
+	r := getOutputReader()
 	testBytes := []byte("testing")
 	r.listener.Listener <- testBytes
 	buf := make([]byte, len(testBytes))
@@ -72,9 +72,9 @@ func TestJobOutputReaderRead1(t *testing.T) {
 	r.Quit()
 }
 
-// TestJobOutputReaderRead2 test a Read with a buffer smaller than the test value.
-func TestJobOutputReaderRead2(t *testing.T) {
-	r := getJobOutputReader()
+// TestOutputReaderRead2 test a Read with a buffer smaller than the test value.
+func TestOutputReaderRead2(t *testing.T) {
+	r := getOutputReader()
 	testBytes := []byte("testing")
 	r.listener.Listener <- testBytes
 	buf := make([]byte, len(testBytes)-2)
@@ -91,10 +91,10 @@ func TestJobOutputReaderRead2(t *testing.T) {
 	r.Quit()
 }
 
-// TestJobOutputReaderRead3 tests a second Read with buffer smaller than the test
+// TestOutputReaderRead3 tests a second Read with buffer smaller than the test
 // value.
-func TestJobOutputReaderRead3(t *testing.T) {
-	r := getJobOutputReader()
+func TestOutputReaderRead3(t *testing.T) {
+	r := getOutputReader()
 	testBytes := []byte("testing")
 	r.listener.Listener <- testBytes
 	buf := make([]byte, len(testBytes)-2)
@@ -114,10 +114,10 @@ func TestJobOutputReaderRead3(t *testing.T) {
 	r.Quit()
 }
 
-// TestJobOutputReaderRead4 tests a Read after quit is sent when the buffer is
+// TestOutputReaderRead4 tests a Read after quit is sent when the buffer is
 // smaller than the test value.
-func TestJobOutputReaderRead4(t *testing.T) {
-	r := getJobOutputReader()
+func TestOutputReaderRead4(t *testing.T) {
+	r := getOutputReader()
 	testBytes := []byte("testing")
 	r.listener.Listener <- testBytes
 	buf := make([]byte, len(testBytes)-2)
@@ -135,10 +135,10 @@ func TestJobOutputReaderRead4(t *testing.T) {
 	}
 }
 
-// TestJobOutputReaderRead5 tests a second Read after quit is sent when the
+// TestOutputReaderRead5 tests a second Read after quit is sent when the
 // buffer is smaller than the test value.
-func TestJobOutputReaderRead5(t *testing.T) {
-	r := getJobOutputReader()
+func TestOutputReaderRead5(t *testing.T) {
+	r := getOutputReader()
 	testBytes := []byte("testing")
 	r.listener.Listener <- testBytes
 	buf := make([]byte, len(testBytes)-2)
@@ -156,10 +156,10 @@ func TestJobOutputReaderRead5(t *testing.T) {
 	}
 }
 
-// testJobOutputReaderRead6 test a Read after quit is sent and the buffer is
+// testOutputReaderRead6 test a Read after quit is sent and the buffer is
 // larger than the test value.
-func TestJobOutputReaderRead6(t *testing.T) {
-	r := getJobOutputReader()
+func TestOutputReaderRead6(t *testing.T) {
+	r := getOutputReader()
 	testBytes := []byte("testing")
 	r.listener.Listener <- testBytes
 	buf := make([]byte, len(testBytes)+2)
@@ -176,10 +176,10 @@ func TestJobOutputReaderRead6(t *testing.T) {
 	}
 }
 
-// TestJobOutputReaderRead7 tests a second Read after quit is sent and the buffer
+// TestOutputReaderRead7 tests a second Read after quit is sent and the buffer
 // is larger than the test value.
-func TestJobOutputReaderRead7(t *testing.T) {
-	r := getJobOutputReader()
+func TestOutputReaderRead7(t *testing.T) {
+	r := getOutputReader()
 	testBytes := []byte("testing")
 	r.listener.Listener <- testBytes
 	buf := make([]byte, len(testBytes)+2)
@@ -194,8 +194,8 @@ func TestJobOutputReaderRead7(t *testing.T) {
 	}
 }
 
-func TestJobOutputRegistryListenSetter(t *testing.T) {
-	r := NewJobOutputRegistry()
+func TestOutputRegistryListenSetter(t *testing.T) {
+	r := NewOutputRegistry()
 	r.Listen()
 	l := r.AddListener()
 	foundlistener := false
@@ -209,8 +209,8 @@ func TestJobOutputRegistryListenSetter(t *testing.T) {
 	}
 }
 
-func TestJobOutputRegistryRemove(t *testing.T) {
-	r := NewJobOutputRegistry()
+func TestOutputRegistryRemove(t *testing.T) {
+	r := NewOutputRegistry()
 	r.Listen()
 	l := r.AddListener()
 	r.RemoveListener(l)
@@ -225,8 +225,8 @@ func TestJobOutputRegistryRemove(t *testing.T) {
 	}
 }
 
-func TestJobOutputRegistryInput(t *testing.T) {
-	r := NewJobOutputRegistry()
+func TestOutputRegistryInput(t *testing.T) {
+	r := NewOutputRegistry()
 	r.Listen()
 	l := r.AddListener()
 	testbytes := []byte("testing")
@@ -237,8 +237,8 @@ func TestJobOutputRegistryInput(t *testing.T) {
 	}
 }
 
-func TestJobOutputRegistryInput2(t *testing.T) {
-	r := NewJobOutputRegistry()
+func TestOutputRegistryInput2(t *testing.T) {
+	r := NewOutputRegistry()
 	r.Listen()
 	l1 := r.AddListener()
 	l2 := r.AddListener()
@@ -268,8 +268,8 @@ func TestJobOutputRegistryInput2(t *testing.T) {
 
 }
 
-func TestJobSyncerWrite(t *testing.T) {
-	s := NewJobSyncer()
+func TestSyncerWrite(t *testing.T) {
+	s := NewSyncer()
 	r := s.OutputRegistry
 	l1 := r.AddListener()
 	l2 := r.AddListener()
@@ -298,10 +298,10 @@ func TestJobSyncerWrite(t *testing.T) {
 	}
 }
 
-func TestJobRegistryRegister(t *testing.T) {
-	r := NewJobRegistry()
+func TestRegistryRegister(t *testing.T) {
+	r := NewRegistry()
 	r.Listen()
-	s := NewJobSyncer()
+	s := NewSyncer()
 	r.Register("testing", s)
 	foundsyncer := false
 	for k, v := range r.Registry {
@@ -314,10 +314,10 @@ func TestJobRegistryRegister(t *testing.T) {
 	}
 }
 
-func TestJobRegistryGet(t *testing.T) {
-	r := NewJobRegistry()
+func TestRegistryGet(t *testing.T) {
+	r := NewRegistry()
 	r.Listen()
-	s := NewJobSyncer()
+	s := NewSyncer()
 	r.Register("testing", s)
 	get := r.Get("testing")
 	if get != s {
@@ -325,10 +325,10 @@ func TestJobRegistryGet(t *testing.T) {
 	}
 }
 
-func TestJobRegistryHasKey(t *testing.T) {
-	r := NewJobRegistry()
+func TestRegistryHasKey(t *testing.T) {
+	r := NewRegistry()
 	r.Listen()
-	s := NewJobSyncer()
+	s := NewSyncer()
 	r.Register("testing", s)
 	if !r.HasKey("testing") {
 		t.Fail()
@@ -338,10 +338,10 @@ func TestJobRegistryHasKey(t *testing.T) {
 	}
 }
 
-func TestJobRegistryDelete(t *testing.T) {
-	r := NewJobRegistry()
+func TestRegistryDelete(t *testing.T) {
+	r := NewRegistry()
 	r.Listen()
-	s := NewJobSyncer()
+	s := NewSyncer()
 	r.Register("testing", s)
 	r.Delete(s)
 	if r.HasKey("testing") {
@@ -349,14 +349,14 @@ func TestJobRegistryDelete(t *testing.T) {
 	}
 }
 
-func TestJobRegistryListJobs(t *testing.T) {
-	r := NewJobRegistry()
+func TestRegistryList(t *testing.T) {
+	r := NewRegistry()
 	r.Listen()
-	s := NewJobSyncer()
+	s := NewSyncer()
 	r.Register("testing", s)
 	r.Register("testing2", s)
 	r.Register("testing3", s)
-	list := r.ListJobs()
+	list := r.List()
 	found1 := false
 	found2 := false
 	found3 := false
@@ -378,17 +378,17 @@ func TestJobRegistryListJobs(t *testing.T) {
 
 }
 
-func TestJobExecutorLaunch(t *testing.T) {
-	r := NewJobExecutor()
+func TestExecutorLaunch(t *testing.T) {
+	r := NewExecutor()
 	jobid := r.Launch("echo foo", make(map[string]string))
 	if jobid == "" {
 		t.Fail()
 	}
 }
 
-func TestJobExecutorExecute(t *testing.T) {
-	e := NewJobExecutor()
-	s := NewJobSyncer()
+func TestExecutorExecute(t *testing.T) {
+	e := NewExecutor()
+	s := NewSyncer()
 	ec := make(chan int)
 	go func() {
 		<-s.Completed
@@ -407,8 +407,8 @@ func TestJobExecutorExecute(t *testing.T) {
 	}
 }
 
-func TestJobExecutorKill(t *testing.T) {
-	e := NewJobExecutor()
+func TestExecutorKill(t *testing.T) {
+	e := NewExecutor()
 	jobid := e.Launch("while true; do echo foo; done", make(map[string]string))
 	s := e.Registry.Get(jobid)
 	coord := make(chan int)
@@ -422,7 +422,7 @@ func TestJobExecutorKill(t *testing.T) {
 		t.Errorf("Exit code for the kill command wasn't -100.")
 	}
 	if !s.Killed {
-		t.Errorf("The JobSyncer.Killed field wasn't false.")
+		t.Errorf("The Syncer.Killed field wasn't false.")
 	}
 	if e.Registry.HasKey(jobid) {
 		t.Error("The registry still has a reference to the jobID")

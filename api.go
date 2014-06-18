@@ -37,35 +37,35 @@ func init() {
 	expvar.Publish("addrs", expvar.Func(addrsAsStrings))
 }
 
-// StartJobMsg represents a job start request
-type StartJobMsg struct {
+// StartMsg represents a job start request
+type StartMsg struct {
 	CommandLine string
 	Environment map[string]string
 }
 
-// JobIDMsg represents a JobID response
-type JobIDMsg struct {
-	JobID string
+// IDMsg represents a ID response
+type IDMsg struct {
+	ID string
 }
 
 // APIHandlers defines handlers for the endpoints and gives them access to a
-// JobExecutor.
+// Executor.
 type APIHandlers struct {
-	Executor *JobExecutor
+	Executor *Executor
 }
 
 // NewAPIHandlers constructs a new instance of APIHandlers and returns a pointer
 // to it.
 func NewAPIHandlers() *APIHandlers {
 	return &APIHandlers{
-		Executor: NewJobExecutor(),
+		Executor: NewExecutor(),
 	}
 }
 
-//StartJob starts a job and returns a job ID.
-func (h *APIHandlers) StartJob(resp http.ResponseWriter, r *http.Request) {
+//Start starts a job and returns a job ID.
+func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
-	var jobMsg StartJobMsg
+	var jobMsg StartMsg
 	if err := dec.Decode(&jobMsg); err != nil {
 		http.Error(resp, err.Error(), 500)
 		return
@@ -79,8 +79,8 @@ func (h *APIHandlers) StartJob(resp http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jid := h.Executor.Launch(jobMsg.CommandLine, jobMsg.Environment)
-	returnMsg, err := json.Marshal(&JobIDMsg{
-		JobID: jid,
+	returnMsg, err := json.Marshal(&IDMsg{
+		ID: jid,
 	})
 	if err != nil {
 		http.Error(resp, err.Error(), 500)
@@ -90,21 +90,21 @@ func (h *APIHandlers) StartJob(resp http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(resp, string(returnMsg[:]))
 }
 
-// GetJobInfo returns info about a running job.
-func (h *APIHandlers) GetJobInfo(resp http.ResponseWriter, r *http.Request) {
+// GetInfo returns info about a running job.
+func (h *APIHandlers) GetInfo(resp http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	fmt.Fprintf(resp, "getJobInfo: %s\n", vars["jobID"])
+	fmt.Fprintf(resp, "GetInfo: %s\n", vars["ID"])
 }
 
-// ListJobsResponse represents a the return value for the ListJobs endpoint.
-type ListJobsResponse struct {
-	JobIDs []string
+// ListResponse represents a the return value for the List endpoint.
+type ListResponse struct {
+	IDs []string
 }
 
-// ListJobs returns a list of all of the running jobs.
-func (h *APIHandlers) ListJobs(resp http.ResponseWriter, r *http.Request) {
-	jobs, err := json.Marshal(&ListJobsResponse{
-		JobIDs: h.Executor.Registry.ListJobs(),
+// List returns a list of all of the running jobs.
+func (h *APIHandlers) List(resp http.ResponseWriter, r *http.Request) {
+	jobs, err := json.Marshal(&ListResponse{
+		IDs: h.Executor.Registry.List(),
 	})
 	if err != nil {
 		http.Error(resp, err.Error(), 500)
@@ -113,39 +113,39 @@ func (h *APIHandlers) ListJobs(resp http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(resp, string(jobs[:]))
 }
 
-// AttachToJob streams a combined stdout/stderr for a running job
+// Attach streams a combined stdout/stderr for a running job
 // as a chunked response.
-func (h *APIHandlers) AttachToJob(resp http.ResponseWriter, r *http.Request) {
+func (h *APIHandlers) Attach(resp http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	runID := vars["runID"]
+	ID := vars["ID"]
 	jobRegistry := h.Executor.Registry
-	if !jobRegistry.HasKey(runID) {
-		http.Error(resp, fmt.Sprintf("Job %s not found.", runID), 404)
+	if !jobRegistry.HasKey(ID) {
+		http.Error(resp, fmt.Sprintf("Job %s not found.", ID), 404)
 		return
 	}
-	syncer := jobRegistry.Get(runID)
+	syncer := jobRegistry.Get(ID)
 	outputListener := syncer.OutputRegistry.AddListener()
-	reader := NewJobOutputReader(outputListener)
+	reader := NewOutputReader(outputListener)
 	defer reader.Quit()
 	defer syncer.OutputRegistry.RemoveListener(outputListener)
 	io.Copy(resp, reader)
 }
 
-// KillJob kills a running job.
-func (h *APIHandlers) KillJob(resp http.ResponseWriter, r *http.Request) {
+// Kill kills a running job.
+func (h *APIHandlers) Kill(resp http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	runID := vars["runID"]
-	h.Executor.Kill(runID)
+	ID := vars["ID"]
+	h.Executor.Kill(ID)
 }
 
 // SetupRouter uses Gorilla's mux project to set up a router and returns it.
 func (h *APIHandlers) SetupRouter() *mux.Router {
 	r := mux.NewRouter()
-	r.HandleFunc("/{jobID}", h.GetJobInfo).Methods("GET")
-	r.HandleFunc("/", h.StartJob).Methods("POST")
-	r.HandleFunc("/", h.ListJobs).Methods("GET")
-	r.HandleFunc("/{runID}/attach", h.AttachToJob).Methods("GET")
-	r.HandleFunc("/{runID}", h.KillJob).Methods("DELETE")
+	r.HandleFunc("/{ID}", h.GetInfo).Methods("GET")
+	r.HandleFunc("/", h.Start).Methods("POST")
+	r.HandleFunc("/", h.List).Methods("GET")
+	r.HandleFunc("/{ID}/attach", h.Attach).Methods("GET")
+	r.HandleFunc("/{ID}", h.Kill).Methods("DELETE")
 	return r
 }
 

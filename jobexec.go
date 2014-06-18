@@ -17,27 +17,27 @@ func exitCode(cmd *exec.Cmd) int {
 	return cmd.ProcessState.Sys().(syscall.WaitStatus).ExitStatus()
 }
 
-// JobOutputQuitMsg is sent to the JobOutputRegistry on the Quit channel when
-// a job completes. The JobOutputRegistry then tells all of the registered
-// JobOutputListeners to quit.
-type JobOutputQuitMsg struct {
+// OutputQuitMsg is sent to the OutputRegistry on the Quit channel when
+// a job completes. The OutputRegistry then tells all of the registered
+// OutputListeners to quit.
+type OutputQuitMsg struct {
 	Latch chan int
 }
 
-// JobOutputListener is the message struct for the Setter and Remove channels
-// in a JobOutputRegistry instance. The Listener is the channel that job outputs
+// OutputListener is the message struct for the Setter and Remove channels
+// in a OutputRegistry instance. The Listener is the channel that job outputs
 // are sent out on. The Latch channel is used for synchronizing the
 // AddListener() and RemoveListener() calls.
-type JobOutputListener struct {
+type OutputListener struct {
 	Listener   chan []byte
 	Latch      chan int
 	Quit       chan int
 	readBuffer []byte
 }
 
-// NewJobOutputListener returns a new instance of JobOutputListener.
-func NewJobOutputListener() *JobOutputListener {
-	return &JobOutputListener{
+// NewOutputListener returns a new instance of OutputListener.
+func NewOutputListener() *OutputListener {
+	return &OutputListener{
 		Listener:   make(chan []byte),
 		Latch:      make(chan int),
 		Quit:       make(chan int),
@@ -45,20 +45,20 @@ func NewJobOutputListener() *JobOutputListener {
 	}
 }
 
-// JobOutputReader will buffer and allow Read()s from data sent via a
-// JobOutputListener
-type JobOutputReader struct {
+// OutputReader will buffer and allow Read()s from data sent via a
+// OutputListener
+type OutputReader struct {
 	accum       []byte
-	listener    *JobOutputListener
+	listener    *OutputListener
 	m           *sync.Mutex
 	QuitChannel chan int
 	EOF         bool
 }
 
-// NewJobOutputReader will create a new JobOutputReader with the given
-// JobOutputListener.
-func NewJobOutputReader(l *JobOutputListener) *JobOutputReader {
-	r := &JobOutputReader{
+// NewOutputReader will create a new OutputReader with the given
+// OutputListener.
+func NewOutputReader(l *OutputListener) *OutputReader {
+	r := &OutputReader{
 		accum:       make([]byte, 0),
 		listener:    l,
 		m:           &sync.Mutex{},
@@ -90,9 +90,9 @@ func NewJobOutputReader(l *JobOutputListener) *JobOutputReader {
 	return r
 }
 
-// Reader will do a consuming read from the JobOutputReader's buffer. This makes
+// Reader will do a consuming read from the OutputReader's buffer. This makes
 // it implement the Reader interface.
-func (r *JobOutputReader) Read(p []byte) (n int, err error) {
+func (r *OutputReader) Read(p []byte) (n int, err error) {
 	r.m.Lock()
 	defer r.m.Unlock()
 	if r.EOF && len(r.accum) == 0 {
@@ -120,39 +120,39 @@ func (r *JobOutputReader) Read(p []byte) (n int, err error) {
 }
 
 // Quit will tell the goroutine that pushes data into the buffer to quit.
-func (r *JobOutputReader) Quit() {
+func (r *OutputReader) Quit() {
 	r.m.Lock()
 	r.EOF = true
 	r.m.Unlock()
 	r.QuitChannel <- 1
 }
 
-// JobOutputRegistry contains a list of channels that accept []byte's. Each job
-// gets its own JobOutputRegistry. The JobOutputRegistry is referred to inside
-// the job's JobSyncer instance, which in turn is referred to within the the
-// JobRegistry.
-type JobOutputRegistry struct {
+// OutputRegistry contains a list of channels that accept []byte's. Each job
+// gets its own OutputRegistry. The OutputRegistry is referred to inside
+// the job's Syncer instance, which in turn is referred to within the the
+// Registry.
+type OutputRegistry struct {
 	Input       chan []byte
-	Setter      chan *JobOutputListener
-	Remove      chan *JobOutputListener
-	Registry    map[*JobOutputListener]chan []byte
-	QuitChannel chan *JobOutputQuitMsg
+	Setter      chan *OutputListener
+	Remove      chan *OutputListener
+	Registry    map[*OutputListener]chan []byte
+	QuitChannel chan *OutputQuitMsg
 }
 
-// NewJobOutputRegistry returns a pointer to a new instance of JobOutputRegistry.
-func NewJobOutputRegistry() *JobOutputRegistry {
-	return &JobOutputRegistry{
+// NewOutputRegistry returns a pointer to a new instance of OutputRegistry.
+func NewOutputRegistry() *OutputRegistry {
+	return &OutputRegistry{
 		Input:       make(chan []byte),
-		Setter:      make(chan *JobOutputListener),
-		Remove:      make(chan *JobOutputListener),
-		Registry:    make(map[*JobOutputListener]chan []byte),
-		QuitChannel: make(chan *JobOutputQuitMsg),
+		Setter:      make(chan *OutputListener),
+		Remove:      make(chan *OutputListener),
+		Registry:    make(map[*OutputListener]chan []byte),
+		QuitChannel: make(chan *OutputQuitMsg),
 	}
 }
 
 // Listen fires off a goroutine that can be communicated with through the Input,
 // Setter, and Remove channels.
-func (j *JobOutputRegistry) Listen() {
+func (j *OutputRegistry) Listen() {
 	go func() {
 		for {
 			select {
@@ -177,13 +177,13 @@ func (j *JobOutputRegistry) Listen() {
 	}()
 }
 
-// AddListener creates a JobOutputListener, adds it to the JobOutputRegistry,
-// and returns a pointer to the JobOutputListener. Synchronizes with the
-// JobOutputRegistry goroutine through the JobOutputListener's Latch channel.
-func (j *JobOutputRegistry) AddListener() *JobOutputListener {
+// AddListener creates a OutputListener, adds it to the OutputRegistry,
+// and returns a pointer to the OutputListener. Synchronizes with the
+// OutputRegistry goroutine through the OutputListener's Latch channel.
+func (j *OutputRegistry) AddListener() *OutputListener {
 	listener := make(chan []byte)
 	latch := make(chan int)
-	adder := &JobOutputListener{
+	adder := &OutputListener{
 		Listener:   listener,
 		Latch:      latch,
 		Quit:       make(chan int),
@@ -194,26 +194,26 @@ func (j *JobOutputRegistry) AddListener() *JobOutputListener {
 	return adder
 }
 
-// RemoveListener removes the passed in JobOutputListener from the
-// JobOutputRegistry. Synchronizes with the JobOuputRegistry goroutine through
-// the JobOutputListener's Latch channel. Does not close any channels.
-func (j *JobOutputRegistry) RemoveListener(l *JobOutputListener) {
+// RemoveListener removes the passed in OutputListener from the
+// OutputRegistry. Synchronizes with the JobOuputRegistry goroutine through
+// the OutputListener's Latch channel. Does not close any channels.
+func (j *OutputRegistry) RemoveListener(l *OutputListener) {
 	j.Remove <- l
 	<-l.Latch
 }
 
-// Quit tells the JobOutputRegistry's goroutine to exit.
-func (j *JobOutputRegistry) Quit() {
-	msg := &JobOutputQuitMsg{
+// Quit tells the OutputRegistry's goroutine to exit.
+func (j *OutputRegistry) Quit() {
+	msg := &OutputQuitMsg{
 		Latch: make(chan int),
 	}
 	j.QuitChannel <- msg
 	<-msg.Latch
 }
 
-// JobSyncer contains channels that can be used to communicate with a job
-// goroutine. It also contains a pointer to a JobOutputRegistry.
-type JobSyncer struct {
+// Syncer contains channels that can be used to communicate with a job
+// goroutine. It also contains a pointer to a OutputRegistry.
+type Syncer struct {
 	Command        chan string
 	Environment    chan map[string]string
 	Start          chan int
@@ -224,13 +224,13 @@ type JobSyncer struct {
 	ExitCode       int
 	Completed      chan int
 	CmdPtr         *exec.Cmd
-	OutputRegistry *JobOutputRegistry
+	OutputRegistry *OutputRegistry
 	UUID           string
 }
 
-// NewJobSyncer creates a new instance of JobSyncer and returns a pointer to it.
-func NewJobSyncer() *JobSyncer {
-	s := &JobSyncer{
+// NewSyncer creates a new instance of Syncer and returns a pointer to it.
+func NewSyncer() *Syncer {
+	s := &Syncer{
 		Command:        make(chan string),
 		Environment:    make(chan map[string]string),
 		Start:          make(chan int),
@@ -241,7 +241,7 @@ func NewJobSyncer() *JobSyncer {
 		ExitCode:       -9000,
 		Completed:      make(chan int),
 		CmdPtr:         nil,
-		OutputRegistry: NewJobOutputRegistry(),
+		OutputRegistry: NewOutputRegistry(),
 		UUID:           "",
 	}
 	s.OutputRegistry.Listen()
@@ -249,71 +249,71 @@ func NewJobSyncer() *JobSyncer {
 }
 
 // Write sends the []byte array passed out on RoutineWriter's OutChannel
-func (j *JobSyncer) Write(p []byte) (n int, err error) {
+func (j *Syncer) Write(p []byte) (n int, err error) {
 	j.OutputRegistry.Input <- p
 	return len(p), nil
 }
 
-// Quit tells the JobSyncer to clean up its OutputRegistry
-func (j *JobSyncer) Quit() {
+// Quit tells the Syncer to clean up its OutputRegistry
+func (j *Syncer) Quit() {
 	j.OutputRegistry.Quit()
 }
 
-// JobRegistryGetMsg wraps a key that you want to retrieve from a JobRegistry
+// RegistryGetMsg wraps a key that you want to retrieve from a Registry
 // and a Resp channel that the retrieved value should be sent back on.
-type JobRegistryGetMsg struct {
+type RegistryGetMsg struct {
 	Key  string
-	Resp chan *JobSyncer
+	Resp chan *Syncer
 }
 
-// JobRegistrySetMsg wraps a key that you want to set, the Value (a *JobSyncer)
+// RegistrySetMsg wraps a key that you want to set, the Value (a *Syncer)
 // that should be associated with the key, and a Latch channel that will be
 // sent an integer when the Value has been set.
-type JobRegistrySetMsg struct {
+type RegistrySetMsg struct {
 	Key   string
-	Value *JobSyncer
+	Value *Syncer
 	Latch chan int
 }
 
-// JobRegistryListMsg is the struct that job UUIDs are returned in by the
-// JobRegistry.
-type JobRegistryListMsg struct {
+// RegistryListMsg is the struct that job UUIDs are returned in by the
+// Registry.
+type RegistryListMsg struct {
 	Jobs chan []string
 }
 
-// JobRegistryRemoveMsg is the struct used to remove JobSyncers from the registry.
-type JobRegistryRemoveMsg struct {
-	Syncer *JobSyncer
+// RegistryRemoveMsg is the struct used to remove Syncers from the registry.
+type RegistryRemoveMsg struct {
+	Syncer *Syncer
 	Latch  chan int
 }
 
-// JobRegistry encapsulates a map associating a string with a *JobSyncer. This
+// Registry encapsulates a map associating a string with a *Syncer. This
 // will let additional goroutines communicate with the goroutine running the
 // job associated with the key. The key will most likely be a UUID. There should
-// only be one instance on JobRegistry per jobrunner instance.
-type JobRegistry struct {
-	Setter   chan *JobRegistrySetMsg
-	Getter   chan *JobRegistryGetMsg
-	Remove   chan *JobRegistryRemoveMsg
-	Lister   chan *JobRegistryListMsg
-	Registry map[string]*JobSyncer
+// only be one instance on Registry per jobrunner instance.
+type Registry struct {
+	Setter   chan *RegistrySetMsg
+	Getter   chan *RegistryGetMsg
+	Remove   chan *RegistryRemoveMsg
+	Lister   chan *RegistryListMsg
+	Registry map[string]*Syncer
 }
 
-// NewJobRegistry creates a new instance of JobRegistry and returns a pointer to
+// NewRegistry creates a new instance of Registry and returns a pointer to
 // it. Does not make sure that only one instance is created.
-func NewJobRegistry() *JobRegistry {
-	return &JobRegistry{
-		Setter:   make(chan *JobRegistrySetMsg),
-		Getter:   make(chan *JobRegistryGetMsg),
-		Remove:   make(chan *JobRegistryRemoveMsg),
-		Lister:   make(chan *JobRegistryListMsg),
-		Registry: make(map[string]*JobSyncer),
+func NewRegistry() *Registry {
+	return &Registry{
+		Setter:   make(chan *RegistrySetMsg),
+		Getter:   make(chan *RegistryGetMsg),
+		Remove:   make(chan *RegistryRemoveMsg),
+		Lister:   make(chan *RegistryListMsg),
+		Registry: make(map[string]*Syncer),
 	}
 }
 
 // Listen launches a goroutine that can be communicated with via the setter
 // and getter channels passed in. Listen is non-blocking.
-func (j *JobRegistry) Listen() {
+func (j *Registry) Listen() {
 	go func() {
 		for {
 			select {
@@ -345,10 +345,10 @@ func (j *JobRegistry) Listen() {
 	}()
 }
 
-// Register adds the *JobSyncer to the registry with the key set to the
+// Register adds the *Syncer to the registry with the key set to the
 // value of uuid.
-func (j *JobRegistry) Register(uuid string, s *JobSyncer) {
-	m := &JobRegistrySetMsg{
+func (j *Registry) Register(uuid string, s *Syncer) {
+	m := &RegistrySetMsg{
 		Key:   uuid,
 		Value: s,
 		Latch: make(chan int),
@@ -358,20 +358,20 @@ func (j *JobRegistry) Register(uuid string, s *JobSyncer) {
 }
 
 // Get looks up the job for the given uuid in the registry.
-func (j *JobRegistry) Get(uuid string) *JobSyncer {
-	getMsg := &JobRegistryGetMsg{
+func (j *Registry) Get(uuid string) *Syncer {
+	getMsg := &RegistryGetMsg{
 		Key:  uuid,
-		Resp: make(chan *JobSyncer),
+		Resp: make(chan *Syncer),
 	}
 	j.Getter <- getMsg
 	return <-getMsg.Resp
 }
 
 // HasKey returns true if a job associated with uuid is running, false otherwise.
-func (j *JobRegistry) HasKey(uuid string) bool {
-	getMsg := &JobRegistryGetMsg{
+func (j *Registry) HasKey(uuid string) bool {
+	getMsg := &RegistryGetMsg{
 		Key:  uuid,
-		Resp: make(chan *JobSyncer),
+		Resp: make(chan *Syncer),
 	}
 	j.Getter <- getMsg
 	r := <-getMsg.Resp
@@ -381,9 +381,9 @@ func (j *JobRegistry) HasKey(uuid string) bool {
 	return true
 }
 
-// ListJobs returns the list of jobs from the registry.
-func (j *JobRegistry) ListJobs() []string {
-	lister := &JobRegistryListMsg{
+// List returns the list of jobs from the registry.
+func (j *Registry) List() []string {
+	lister := &RegistryListMsg{
 		Jobs: make(chan []string),
 	}
 	j.Lister <- lister
@@ -394,9 +394,9 @@ func (j *JobRegistry) ListJobs() []string {
 	return retval
 }
 
-// Delete deletes a *JobSyncer from the registry.
-func (j *JobRegistry) Delete(s *JobSyncer) {
-	msg := &JobRegistryRemoveMsg{
+// Delete deletes a *Syncer from the registry.
+func (j *Registry) Delete(s *Syncer) {
+	msg := &RegistryRemoveMsg{
 		Syncer: s,
 		Latch:  make(chan int),
 	}
@@ -404,27 +404,27 @@ func (j *JobRegistry) Delete(s *JobSyncer) {
 	<-msg.Latch
 }
 
-// JobExecutor maintains a reference to a JobRegistry and is able to launch
-// jobs. There should only be one instance of JobExecutor per instance of
+// Executor maintains a reference to a Registry and is able to launch
+// jobs. There should only be one instance of Executor per instance of
 // jobrunner, but there isn't anything to prevent you from creating more than
 // one.
-type JobExecutor struct {
-	Registry *JobRegistry
+type Executor struct {
+	Registry *Registry
 }
 
-// NewJobExecutor creates a new instance of JobExecutor and returns a pointer to
+// NewExecutor creates a new instance of Executor and returns a pointer to
 // it.
-func NewJobExecutor() *JobExecutor {
-	e := &JobExecutor{
-		Registry: NewJobRegistry(),
+func NewExecutor() *Executor {
+	e := &Executor{
+		Registry: NewRegistry(),
 	}
 	e.Registry.Listen()
 	return e
 }
 
-// Launch fires off a new job, adding its JobSyncer instance to the job registry.
-func (j *JobExecutor) Launch(command string, environment map[string]string) string {
-	syncer := NewJobSyncer()
+// Launch fires off a new job, adding its Syncer instance to the job registry.
+func (j *Executor) Launch(command string, environment map[string]string) string {
+	syncer := NewSyncer()
 	jobID := uuid.New()
 	syncer.UUID = jobID
 	j.Registry.Register(jobID, syncer)
@@ -437,7 +437,7 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 	return jobID
 }
 
-func monitorJobState(s *JobSyncer, done chan<- error, abort <-chan int) {
+func monitorJobState(s *Syncer, done chan<- error, abort <-chan int) {
 	go func() {
 		for {
 			select {
@@ -464,9 +464,9 @@ func monitorJobState(s *JobSyncer, done chan<- error, abort <-chan int) {
 	}()
 }
 
-// Execute starts up a goroutine that communicates via a JobSyncer and will
+// Execute starts up a goroutine that communicates via a Syncer and will
 // eventually execute a job.
-func (j *JobExecutor) Execute(s *JobSyncer) {
+func (j *Executor) Execute(s *Syncer) {
 	log.Printf("Executing job %s.", s.UUID)
 	go func() {
 		shouldStart := false
@@ -535,7 +535,7 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 }
 
 // Kill terminates the specified job with extreme prejudice.
-func (j *JobExecutor) Kill(uuid string) {
+func (j *Executor) Kill(uuid string) {
 	if j.Registry.HasKey(uuid) {
 		syncer := j.Registry.Get(uuid)
 		syncer.Kill <- 1
