@@ -216,9 +216,13 @@ type JobSyncer struct {
 	Command        chan string
 	Environment    chan map[string]string
 	Start          chan int
+	Started        chan int
 	Kill           chan int
+	Killed         bool
 	Output         chan []byte
-	ExitCode       chan int
+	ExitCode       int
+	Completed      chan int
+	CmdPtr         *exec.Cmd
 	OutputRegistry *JobOutputRegistry
 }
 
@@ -228,9 +232,13 @@ func NewJobSyncer() *JobSyncer {
 		Command:        make(chan string),
 		Environment:    make(chan map[string]string),
 		Start:          make(chan int),
+		Started:        make(chan int),
 		Kill:           make(chan int),
+		Killed:         false,
 		Output:         make(chan []byte),
-		ExitCode:       make(chan int),
+		ExitCode:       -9000,
+		Completed:      make(chan int),
+		CmdPtr:         nil,
 		OutputRegistry: NewJobOutputRegistry(),
 	}
 	s.OutputRegistry.Listen()
@@ -310,7 +318,12 @@ func (j *JobRegistry) Listen() {
 				j.Registry[s.Key] = s.Value
 				s.Latch <- 1
 			case g := <-j.Getter:
-				g.Resp <- j.Registry[g.Key]
+				v, ok := j.Registry[g.Key]
+				if !ok {
+					g.Resp <- nil
+				} else {
+					g.Resp <- v
+				}
 			case rem := <-j.Remove:
 				for k, v := range j.Registry {
 					if v == rem.Syncer {
@@ -410,27 +423,46 @@ func NewJobExecutor() *JobExecutor {
 func (j *JobExecutor) Launch(command string, environment map[string]string) string {
 	syncer := NewJobSyncer()
 	//temporary workaround. acts as a sink for exit codes.
-	go func() {
-		select {
-		case e := <-syncer.ExitCode:
-			fmt.Println(e)
-		}
-	}()
+	// go func() {
+	// 	select {
+	// 	case e := <-syncer.ExitCode:
+	// 		fmt.Println(e)
+	// 	}
+	// }()
 	jobID := uuid.New()
 	j.Registry.Register(jobID, syncer)
 	j.Execute(syncer)
 	syncer.Command <- command
 	syncer.Environment <- environment
 	syncer.Start <- 1
+	<-syncer.Started
 	return jobID
+}
+
+func monitorJobState(s *JobSyncer, done chan<- error, abort <-chan int) {
+	go func() {
+		select {
+		case <-s.Kill:
+			s.Killed = true
+			if s.CmdPtr != nil {
+				s.CmdPtr.Process.Kill()
+			}
+			return
+		case <-abort:
+			return
+		}
+	}()
+	go func() {
+		select {
+		case done <- s.CmdPtr.Wait():
+		}
+	}()
 }
 
 // Execute starts up a goroutine that communicates via a JobSyncer and will
 // eventually execute a job.
 func (j *JobExecutor) Execute(s *JobSyncer) {
 	go func() {
-		defer s.Quit()
-		defer j.Registry.Delete(s)
 		shouldStart := false
 		running := false
 		var cmdString string
@@ -443,35 +475,60 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 			case environment = <-s.Environment:
 			case <-s.Start:
 				shouldStart = true
-			case <-s.Kill:
-				if running && cmd != nil {
-					cmd.Process.Kill()
-				}
 			}
 
 			if cmdString != "" && environment != nil && shouldStart && !running {
-				go func() {
-					cmd = exec.Command("bash", "-c", cmdString)
-					cmd.Env = formatEnv(environment)
-					cmd.Stdout = s
-					cmd.Stderr = s
-					err := cmd.Start()
-					if err != nil {
-						fmt.Println(err)
-						s.ExitCode <- -1000
-						return
-					}
-					err = cmd.Wait()
-					if err != nil {
-						fmt.Println(err)
-						s.ExitCode <- -2000
-						return
-					}
-					s.ExitCode <- exitCode(cmd)
-				}()
-				running = true
+				break
 			}
 		}
+
+		cmd = exec.Command("bash", "-c", cmdString)
+		cmd.Env = formatEnv(environment)
+		cmd.Stdout = s
+		cmd.Stderr = s
+		s.CmdPtr = cmd
+
+		done := make(chan error)
+		abort := make(chan int)
+
+		err := cmd.Start()
+		s.Started <- 1
+		if err != nil {
+			s.ExitCode = -1000
+			abort <- 1
+			return
+		}
+
+		monitorJobState(s, done, abort)
+
+		go func() {
+			defer s.Quit()
+			defer j.Registry.Delete(s)
+			select {
+			case err := <-done:
+				if s.Killed { //Job killed
+					s.ExitCode = -100
+					s.Completed <- 1
+					return
+				}
+				if err == nil && s.ExitCode == -9000 { //Job exited normally
+					if cmd.ProcessState != nil {
+						s.ExitCode = exitCode(cmd)
+					} else {
+						s.ExitCode = 0
+					}
+				}
+				if err != nil { //job exited badly, but wasn't killed
+					if cmd.ProcessState != nil {
+						s.ExitCode = exitCode(cmd)
+					} else {
+						s.ExitCode = 1
+					}
+				}
+				s.Completed <- 1
+				return
+			}
+		}()
 	}()
 }
 

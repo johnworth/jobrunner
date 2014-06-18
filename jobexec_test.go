@@ -391,16 +391,39 @@ func TestJobExecutorExecute(t *testing.T) {
 	s := NewJobSyncer()
 	ec := make(chan int)
 	go func() {
-		retval := <-s.ExitCode
-		ec <- retval
+		<-s.Completed
+		ec <- s.ExitCode
 	}()
 	e.Execute(s)
 	e.Registry.Register("blippy", s)
 	s.Command <- "echo $FOO"
 	s.Environment <- map[string]string{"FOO": "BAR"}
 	s.Start <- 1
+	<-s.Started
 	exit := <-ec
 	if exit != 0 {
 		t.Fail()
+	}
+}
+
+func TestJobExecutorKill(t *testing.T) {
+	e := NewJobExecutor()
+	jobid := e.Launch("while true; do echo foo; done", make(map[string]string))
+	s := e.Registry.Get(jobid)
+	coord := make(chan int)
+	go func() {
+		<-s.Completed
+		coord <- s.ExitCode
+	}()
+	e.Kill(jobid)
+	exit := <-coord
+	if exit != -100 {
+		t.Errorf("Exit code for the kill command wasn't -100.")
+	}
+	if !s.Killed {
+		t.Errorf("The JobSyncer.Killed field wasn't false.")
+	}
+	if e.Registry.HasKey(jobid) {
+		t.Error("The registry still has a reference to the jobID")
 	}
 }
