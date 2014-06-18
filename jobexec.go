@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -224,6 +225,7 @@ type JobSyncer struct {
 	Completed      chan int
 	CmdPtr         *exec.Cmd
 	OutputRegistry *JobOutputRegistry
+	UUID           string
 }
 
 // NewJobSyncer creates a new instance of JobSyncer and returns a pointer to it.
@@ -240,6 +242,7 @@ func NewJobSyncer() *JobSyncer {
 		Completed:      make(chan int),
 		CmdPtr:         nil,
 		OutputRegistry: NewJobOutputRegistry(),
+		UUID:           "",
 	}
 	s.OutputRegistry.Listen()
 	return s
@@ -423,6 +426,7 @@ func NewJobExecutor() *JobExecutor {
 func (j *JobExecutor) Launch(command string, environment map[string]string) string {
 	syncer := NewJobSyncer()
 	jobID := uuid.New()
+	syncer.UUID = jobID
 	j.Registry.Register(jobID, syncer)
 	j.Execute(syncer)
 	syncer.Command <- command
@@ -440,10 +444,13 @@ func monitorJobState(s *JobSyncer, done chan<- error, abort <-chan int) {
 			if s.CmdPtr != nil {
 				s.CmdPtr.Process.Kill()
 			}
+			log.Printf("Kill signal was sent to job %s.", s.UUID)
 			return
 		case <-s.Completed:
+			log.Printf("Job %s completed.", s.UUID)
 			return
 		case <-abort:
+			log.Printf("Abort was sent for job %s.", s.UUID)
 			return
 		}
 	}()
@@ -520,6 +527,7 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 						s.ExitCode = 1
 					}
 				}
+				log.Printf("Job %s exited with a status of %d.", s.UUID, s.ExitCode)
 				s.Completed <- 1
 				return
 			}
