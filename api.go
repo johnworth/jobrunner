@@ -2,14 +2,40 @@ package main
 
 import (
 	"encoding/json"
-	_ "expvar"
+	"expvar"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"runtime"
 
 	"github.com/gorilla/mux"
 )
+
+func addrsAsStrings() interface{} {
+	var retval []string
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		retval = []string{"Couldn't get interface addresses."}
+	} else {
+		retval = make([]string, 0)
+		for _, addr := range addrs {
+			retval = append(retval, addr.String())
+		}
+	}
+	return retval
+}
+
+func init() {
+	cpus := expvar.NewInt("numcpus")
+	cpus.Set(int64(runtime.NumCPU()))
+
+	goversion := expvar.NewString("goversion")
+	goversion.Set(runtime.Version())
+
+	expvar.Publish("addrs", expvar.Func(addrsAsStrings))
+}
 
 // StartJobMsg represents a job start request
 type StartJobMsg struct {
