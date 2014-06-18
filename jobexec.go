@@ -428,6 +428,7 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 	jobID := uuid.New()
 	syncer.UUID = jobID
 	j.Registry.Register(jobID, syncer)
+	log.Printf("Registering job %s.", jobID)
 	j.Execute(syncer)
 	syncer.Command <- command
 	syncer.Environment <- environment
@@ -466,13 +467,13 @@ func monitorJobState(s *JobSyncer, done chan<- error, abort <-chan int) {
 // Execute starts up a goroutine that communicates via a JobSyncer and will
 // eventually execute a job.
 func (j *JobExecutor) Execute(s *JobSyncer) {
+	log.Printf("Executing job %s.", s.UUID)
 	go func() {
 		shouldStart := false
 		running := false
 		var cmdString string
 		var environment map[string]string
 		var cmd *exec.Cmd
-
 		for {
 			select {
 			case cmdString = <-s.Command:
@@ -485,16 +486,13 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 				break
 			}
 		}
-
 		cmd = exec.Command("bash", "-c", cmdString)
 		cmd.Env = formatEnv(environment)
 		cmd.Stdout = s
 		cmd.Stderr = s
 		s.CmdPtr = cmd
-
 		done := make(chan error)
 		abort := make(chan int)
-
 		err := cmd.Start()
 		s.Started <- 1
 		if err != nil {
@@ -502,9 +500,8 @@ func (j *JobExecutor) Execute(s *JobSyncer) {
 			abort <- 1
 			return
 		}
-
+		log.Printf("Started job %s.", s.UUID)
 		monitorJobState(s, done, abort)
-
 		go func() {
 			defer s.Quit()
 			defer j.Registry.Delete(s)
