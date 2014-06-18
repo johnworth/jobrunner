@@ -438,25 +438,27 @@ func (j *JobExecutor) Launch(command string, environment map[string]string) stri
 
 func monitorJobState(s *JobSyncer, done chan<- error, abort <-chan int) {
 	go func() {
-		select {
-		case <-s.Kill:
-			s.Killed = true
-			if s.CmdPtr != nil {
-				s.CmdPtr.Process.Kill()
+		for {
+			select {
+			case <-s.Kill:
+				s.Killed = true
+				if s.CmdPtr != nil {
+					s.CmdPtr.Process.Kill()
+				}
+				log.Printf("Kill signal was sent to job %s.", s.UUID)
+			case <-s.Completed:
+				log.Printf("Job %s completed.", s.UUID)
+				return
+			case <-abort:
+				log.Printf("Abort was sent for job %s.", s.UUID)
+				return
 			}
-			log.Printf("Kill signal was sent to job %s.", s.UUID)
-			return
-		case <-s.Completed:
-			log.Printf("Job %s completed.", s.UUID)
-			return
-		case <-abort:
-			log.Printf("Abort was sent for job %s.", s.UUID)
-			return
 		}
 	}()
 	go func() {
 		select {
 		case done <- s.CmdPtr.Wait():
+			log.Printf("Job %s is no longer in the Wait state.", s.UUID)
 		}
 	}()
 }

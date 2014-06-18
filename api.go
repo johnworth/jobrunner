@@ -104,6 +104,13 @@ func (h *APIHandlers) AttachToJob(resp http.ResponseWriter, r *http.Request) {
 	io.Copy(resp, reader)
 }
 
+// KillJob kills a running job.
+func (h *APIHandlers) KillJob(resp http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	runID := vars["runID"]
+	h.Executor.Kill(runID)
+}
+
 // SetupRouter uses Gorilla's mux project to set up a router and returns it.
 func (h *APIHandlers) SetupRouter() *mux.Router {
 	r := mux.NewRouter()
@@ -111,6 +118,7 @@ func (h *APIHandlers) SetupRouter() *mux.Router {
 	r.HandleFunc("/", h.StartJob).Methods("POST")
 	r.HandleFunc("/", h.ListJobs).Methods("GET")
 	r.HandleFunc("/{runID}/attach", h.AttachToJob).Methods("GET")
+	r.HandleFunc("/{runID}", h.KillJob).Methods("DELETE")
 	return r
 }
 
