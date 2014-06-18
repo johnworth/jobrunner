@@ -396,6 +396,7 @@ func TestJobExecutorExecute(t *testing.T) {
 	}()
 	e.Execute(s)
 	e.Registry.Register("blippy", s)
+	s.UUID = "blippy"
 	s.Command <- "echo $FOO"
 	s.Environment <- map[string]string{"FOO": "BAR"}
 	s.Start <- 1

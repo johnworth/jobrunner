@@ -156,17 +156,17 @@ func (j *JobOutputRegistry) Listen() {
 	go func() {
 		for {
 			select {
-			case a := <-j.Setter:
+			case a := <-j.Setter: //Adding a Listener
 				j.Registry[a] = a.Listener
 				a.Latch <- 1
-			case buf := <-j.Input:
+			case buf := <-j.Input: //Demuxing the output to the listeners
 				for _, ch := range j.Registry {
 					ch <- buf
 				}
-			case rem := <-j.Remove:
+			case rem := <-j.Remove: //Removing a listener
 				delete(j.Registry, rem)
 				rem.Latch <- 1
-			case q := <-j.QuitChannel:
+			case q := <-j.QuitChannel: //Demuxing a Quit command to the listeners.
 				for l := range j.Registry {
 					l.Quit <- 1
 				}
