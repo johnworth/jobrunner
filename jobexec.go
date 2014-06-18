@@ -422,13 +422,6 @@ func NewJobExecutor() *JobExecutor {
 // Launch fires off a new job, adding its JobSyncer instance to the job registry.
 func (j *JobExecutor) Launch(command string, environment map[string]string) string {
 	syncer := NewJobSyncer()
-	//temporary workaround. acts as a sink for exit codes.
-	// go func() {
-	// 	select {
-	// 	case e := <-syncer.ExitCode:
-	// 		fmt.Println(e)
-	// 	}
-	// }()
 	jobID := uuid.New()
 	j.Registry.Register(jobID, syncer)
 	j.Execute(syncer)
@@ -447,6 +440,8 @@ func monitorJobState(s *JobSyncer, done chan<- error, abort <-chan int) {
 			if s.CmdPtr != nil {
 				s.CmdPtr.Process.Kill()
 			}
+			return
+		case <-s.Completed:
 			return
 		case <-abort:
 			return
