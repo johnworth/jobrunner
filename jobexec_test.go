@@ -198,7 +198,7 @@ func TestOutputRegistryListenSetter(t *testing.T) {
 	r := NewOutputRegistry()
 	l := r.AddListener()
 	foundlistener := false
-	for p := range r.Registry {
+	for p := range r.registry {
 		if p == l {
 			foundlistener = true
 		}
@@ -213,7 +213,7 @@ func TestOutputRegistryRemove(t *testing.T) {
 	l := r.AddListener()
 	r.RemoveListener(l)
 	foundlistener := false
-	for p := range r.Registry {
+	for p := range r.registry {
 		if p == l {
 			foundlistener = true
 		}

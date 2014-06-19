@@ -129,25 +129,25 @@ func (r *OutputReader) Quit() {
 	r.QuitChannel <- 1
 }
 
-// OutputRegistry contains a list of channels that accept []byte's. Each job
+// outputRegistry contains a list of channels that accept []byte's. Each job
 // gets its own OutputRegistry. The OutputRegistry is referred to inside
 // the job's Syncer instance, which in turn is referred to within the the
 // Registry.
-type OutputRegistry struct {
+type outputRegistry struct {
 	Input       chan []byte
-	Setter      chan *OutputListener
-	Remove      chan *OutputListener
-	Registry    map[*OutputListener]chan []byte
+	setter      chan *OutputListener
+	remove      chan *OutputListener
+	registry    map[*OutputListener]chan []byte
 	QuitChannel chan *OutputQuitMsg
 }
 
 // NewOutputRegistry returns a pointer to a new instance of OutputRegistry.
-func NewOutputRegistry() *OutputRegistry {
-	l := &OutputRegistry{
+func NewOutputRegistry() *outputRegistry {
+	l := &outputRegistry{
 		Input:       make(chan []byte),
-		Setter:      make(chan *OutputListener),
-		Remove:      make(chan *OutputListener),
-		Registry:    make(map[*OutputListener]chan []byte),
+		setter:      make(chan *OutputListener),
+		remove:      make(chan *OutputListener),
+		registry:    make(map[*OutputListener]chan []byte),
 		QuitChannel: make(chan *OutputQuitMsg),
 	}
 	l.run()
@@ -156,22 +156,22 @@ func NewOutputRegistry() *OutputRegistry {
 
 // Listen fires off a goroutine that can be communicated with through the Input,
 // Setter, and Remove channels.
-func (j *OutputRegistry) run() {
+func (o *outputRegistry) run() {
 	go func() {
 		for {
 			select {
-			case a := <-j.Setter: //Adding a Listener
-				j.Registry[a] = a.Listener
+			case a := <-o.setter: //Adding a Listener
+				o.registry[a] = a.Listener
 				a.Latch <- 1
-			case buf := <-j.Input: //Demuxing the output to the listeners
-				for _, ch := range j.Registry {
+			case buf := <-o.Input: //Demuxing the output to the listeners
+				for _, ch := range o.registry {
 					ch <- buf
 				}
-			case rem := <-j.Remove: //Removing a listener
-				delete(j.Registry, rem)
+			case rem := <-o.remove: //Removing a listener
+				delete(o.registry, rem)
 				rem.Latch <- 1
-			case q := <-j.QuitChannel: //Demuxing a Quit command to the listeners.
-				for l := range j.Registry {
+			case q := <-o.QuitChannel: //Demuxing a Quit command to the listeners.
+				for l := range o.registry {
 					l.Quit <- 1
 				}
 				q.Latch <- 1
@@ -184,7 +184,7 @@ func (j *OutputRegistry) run() {
 // AddListener creates a OutputListener, adds it to the OutputRegistry,
 // and returns a pointer to the OutputListener. Synchronizes with the
 // OutputRegistry goroutine through the OutputListener's Latch channel.
-func (j *OutputRegistry) AddListener() *OutputListener {
+func (o *outputRegistry) AddListener() *OutputListener {
 	listener := make(chan []byte)
 	latch := make(chan int)
 	adder := &OutputListener{
@@ -193,7 +193,7 @@ func (j *OutputRegistry) AddListener() *OutputListener {
 		Quit:       make(chan int),
 		readBuffer: make([]byte, 0),
 	}
-	j.Setter <- adder
+	o.setter <- adder
 	<-latch
 	return adder
 }
@@ -201,17 +201,17 @@ func (j *OutputRegistry) AddListener() *OutputListener {
 // RemoveListener removes the passed in OutputListener from the
 // OutputRegistry. Synchronizes with the JobOuputRegistry goroutine through
 // the OutputListener's Latch channel. Does not close any channels.
-func (j *OutputRegistry) RemoveListener(l *OutputListener) {
-	j.Remove <- l
+func (o *outputRegistry) RemoveListener(l *OutputListener) {
+	o.remove <- l
 	<-l.Latch
 }
 
 // Quit tells the OutputRegistry's goroutine to exit.
-func (j *OutputRegistry) Quit() {
+func (o *outputRegistry) Quit() {
 	msg := &OutputQuitMsg{
 		Latch: make(chan int),
 	}
-	j.QuitChannel <- msg
+	o.QuitChannel <- msg
 	<-msg.Latch
 }
 
@@ -228,7 +228,7 @@ type Syncer struct {
 	ExitCode       int
 	Completed      chan int
 	CmdPtr         *exec.Cmd
-	OutputRegistry *OutputRegistry
+	OutputRegistry *outputRegistry
 	UUID           string
 }
 
