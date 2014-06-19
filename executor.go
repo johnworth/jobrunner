@@ -203,15 +203,8 @@ func (o *outputRegistry) run() {
 // and returns a pointer to the OutputListener. Synchronizes with the
 // OutputRegistry goroutine through the OutputListener's Latch channel.
 func (o *outputRegistry) AddListener() *OutputListener {
-	listener := make(chan []byte)
-	latch := make(chan int)
-	adder := &OutputListener{
-		Listener:   listener,
-		Latch:      latch,
-		Quit:       make(chan int),
-		readBuffer: make([]byte, 0),
-	}
-	o.commands <- outputRegistryCmd{key: adder, value: listener, action: registrySet}
+	adder := NewOutputListener()
+	o.commands <- outputRegistryCmd{key: adder, value: adder.Listener, action: registrySet}
 	return adder
 }
 
