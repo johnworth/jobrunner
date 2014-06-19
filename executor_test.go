@@ -17,12 +17,7 @@ func TestExitCode(t *testing.T) {
 }
 
 func getOutputReader() *OutputReader {
-	jol := &OutputListener{
-		Listener:   make(chan []byte),
-		Latch:      make(chan int),
-		Quit:       make(chan int),
-		readBuffer: make([]byte, 0),
-	}
+	jol := NewOutputListener()
 	return NewOutputReader(jol)
 }
 
