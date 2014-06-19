@@ -30,7 +30,6 @@ type OutputQuitMsg struct {
 // AddListener() and RemoveListener() calls.
 type OutputListener struct {
 	Listener   chan []byte
-	Latch      chan int
 	Quit       chan int
 	readBuffer []byte
 }
@@ -39,7 +38,6 @@ type OutputListener struct {
 func NewOutputListener() *OutputListener {
 	return &OutputListener{
 		Listener:   make(chan []byte),
-		Latch:      make(chan int),
 		Quit:       make(chan int),
 		readBuffer: make([]byte, 0),
 	}
