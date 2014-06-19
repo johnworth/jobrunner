@@ -65,29 +65,31 @@ func NewOutputReader(l *OutputListener) *OutputReader {
 		QuitChannel: make(chan int),
 		EOF:         false,
 	}
-	go func() {
-		for {
-			select {
-			case inBytes := <-r.listener.Listener:
-				r.m.Lock()
-				for _, b := range inBytes {
-					r.accum = append(r.accum, b)
-				}
-				r.m.Unlock()
-			case <-r.listener.Quit: //Quit if the listener tells us to.
-				r.m.Lock()
-				r.EOF = true
-				r.m.Unlock()
-				break
-			case <-r.QuitChannel: //Quit if a caller tells us to.
-				r.m.Lock()
-				r.EOF = true
-				r.m.Unlock()
-				break
-			}
-		}
-	}()
+	go r.run()
 	return r
+}
+
+func (r *OutputReader) run() {
+	for {
+		select {
+		case inBytes := <-r.listener.Listener:
+			r.m.Lock()
+			for _, b := range inBytes {
+				r.accum = append(r.accum, b)
+			}
+			r.m.Unlock()
+		case <-r.listener.Quit: //Quit if the listener tells us to.
+			r.m.Lock()
+			r.EOF = true
+			r.m.Unlock()
+			break
+		case <-r.QuitChannel: //Quit if a caller tells us to.
+			r.m.Lock()
+			r.EOF = true
+			r.m.Unlock()
+			break
+		}
+	}
 }
 
 // Reader will do a consuming read from the OutputReader's buffer. This makes
@@ -148,13 +150,13 @@ func NewOutputRegistry() *OutputRegistry {
 		Registry:    make(map[*OutputListener]chan []byte),
 		QuitChannel: make(chan *OutputQuitMsg),
 	}
-	l.Listen()
+	l.run()
 	return l
 }
 
 // Listen fires off a goroutine that can be communicated with through the Input,
 // Setter, and Remove channels.
-func (j *OutputRegistry) Listen() {
+func (j *OutputRegistry) run() {
 	go func() {
 		for {
 			select {
@@ -246,7 +248,6 @@ func NewSyncer() *Syncer {
 		OutputRegistry: NewOutputRegistry(),
 		UUID:           "",
 	}
-	s.OutputRegistry.Listen()
 	return s
 }
 
@@ -261,151 +262,108 @@ func (j *Syncer) Quit() {
 	j.OutputRegistry.Quit()
 }
 
-// RegistryGetMsg wraps a key that you want to retrieve from a Registry
-// and a Resp channel that the retrieved value should be sent back on.
-type RegistryGetMsg struct {
-	Key  string
-	Resp chan *Syncer
+// RegistryCmd represents a command sent to the registry
+type registryCommand struct {
+	action registryAction
+	key    string
+	value  interface{}
+	result chan<- interface{}
 }
 
-// RegistrySetMsg wraps a key that you want to set, the Value (a *Syncer)
-// that should be associated with the key, and a Latch channel that will be
-// sent an integer when the Value has been set.
-type RegistrySetMsg struct {
-	Key   string
-	Value *Syncer
-	Latch chan int
-}
+type registryAction int
 
-// RegistryListMsg is the struct that job UUIDs are returned in by the
-// Registry.
-type RegistryListMsg struct {
-	Jobs chan []string
-}
-
-// RegistryRemoveMsg is the struct used to remove Syncers from the registry.
-type RegistryRemoveMsg struct {
-	Syncer *Syncer
-	Latch  chan int
-}
+const (
+	remove registryAction = iota
+	find
+	set
+	get
+	length
+	quit
+	listkeys
+)
 
 // Registry encapsulates a map associating a string with a *Syncer. This
 // will let additional goroutines communicate with the goroutine running the
 // job associated with the key. The key will most likely be a UUID. There should
 // only be one instance on Registry per jobrunner instance.
-type Registry struct {
-	Setter   chan *RegistrySetMsg
-	Getter   chan *RegistryGetMsg
-	Remove   chan *RegistryRemoveMsg
-	Lister   chan *RegistryListMsg
-	Registry map[string]*Syncer
-}
+type Registry chan registryCommand
 
 // NewRegistry creates a new instance of Registry and returns a pointer to
 // it. Does not make sure that only one instance is created.
-func NewRegistry() *Registry {
-	r := &Registry{
-		Setter:   make(chan *RegistrySetMsg),
-		Getter:   make(chan *RegistryGetMsg),
-		Remove:   make(chan *RegistryRemoveMsg),
-		Lister:   make(chan *RegistryListMsg),
-		Registry: make(map[string]*Syncer),
-	}
-	r.Listen()
+func NewRegistry() Registry {
+	r := make(Registry)
+	go r.run()
 	return r
+}
+
+type registryFindResult struct {
+	found  bool
+	result *Syncer
 }
 
 // Listen launches a goroutine that can be communicated with via the setter
 // and getter channels passed in. Listen is non-blocking.
-func (j *Registry) Listen() {
-	go func() {
-		for {
-			select {
-			case s := <-j.Setter:
-				j.Registry[s.Key] = s.Value
-				s.Latch <- 1
-			case g := <-j.Getter:
-				v, ok := j.Registry[g.Key]
-				if !ok {
-					g.Resp <- nil
-				} else {
-					g.Resp <- v
-				}
-			case rem := <-j.Remove:
-				for k, v := range j.Registry {
-					if v == rem.Syncer {
-						delete(j.Registry, k)
-					}
-					rem.Latch <- 1
-				}
-			case lister := <-j.Lister:
-				var keys []string
-				for k := range j.Registry {
-					keys = append(keys, k)
-				}
-				lister.Jobs <- keys
+func (r Registry) run() {
+	reg := make(map[string]*Syncer)
+	for command := range r {
+		switch command.action {
+		case set:
+			reg[command.key] = command.value.(*Syncer)
+		case get:
+			val, found := reg[command.key]
+			command.result <- registryFindResult{found, val}
+		case length:
+			command.result <- len(reg)
+		case remove:
+			delete(reg, command.key)
+		case listkeys:
+			var retval []string
+			for k := range reg {
+				retval = append(retval, k)
 			}
+			command.result <- retval
+		case quit:
+			close(r)
 		}
-	}()
+	}
 }
 
 // Register adds the *Syncer to the registry with the key set to the
 // value of uuid.
-func (j *Registry) Register(uuid string, s *Syncer) {
-	m := &RegistrySetMsg{
-		Key:   uuid,
-		Value: s,
-		Latch: make(chan int),
-	}
-	j.Setter <- m
-	<-m.Latch
+func (r Registry) Register(uuid string, s *Syncer) {
+	r <- registryCommand{action: set, key: uuid, value: s}
 }
 
 // Get looks up the job for the given uuid in the registry.
-func (j *Registry) Get(uuid string) *Syncer {
-	getMsg := &RegistryGetMsg{
-		Key:  uuid,
-		Resp: make(chan *Syncer),
-	}
-	j.Getter <- getMsg
-	return <-getMsg.Resp
+func (r Registry) Get(uuid string) *Syncer {
+	reply := make(chan interface{})
+	regCmd := registryCommand{action: get, key: uuid, result: reply}
+	r <- regCmd
+	result := (<-reply).(registryFindResult)
+	return result.result
 }
 
 // HasKey returns true if a job associated with uuid is running, false otherwise.
-func (j *Registry) HasKey(uuid string) bool {
-	getMsg := &RegistryGetMsg{
-		Key:  uuid,
-		Resp: make(chan *Syncer),
-	}
-	j.Getter <- getMsg
-	r := <-getMsg.Resp
-	if r == nil {
-		return false
-	}
-	return true
+func (r Registry) HasKey(uuid string) bool {
+	reply := make(chan interface{})
+	regCmd := registryCommand{action: get, key: uuid, result: reply}
+	r <- regCmd
+	result := (<-reply).(registryFindResult)
+	return result.found
 }
 
 // List returns the list of jobs from the registry.
-func (j *Registry) List() []string {
-	lister := &RegistryListMsg{
-		Jobs: make(chan []string),
-	}
-	j.Lister <- lister
-	retval := <-lister.Jobs
-	if retval == nil {
-		return make([]string, 0)
-	}
-	return retval
+func (r Registry) List() []string {
+	reply := make(chan interface{})
+	regCmd := registryCommand{action: listkeys, result: reply}
+	r <- regCmd
+	result := (<-reply).([]string)
+	return result
 }
 
 // Delete deletes a *Syncer from the registry.
-func (j *Registry) Delete(s *Syncer) {
-	msg := &RegistryRemoveMsg{
-		Syncer: s,
-		Latch:  make(chan int),
-	}
-	j.Remove <- msg
-	<-msg.Latch
+func (r Registry) Delete(uuid string) {
+	r <- registryCommand{action: remove, key: uuid}
 }
 
 // Executor maintains a reference to a Registry and is able to launch
@@ -413,7 +371,7 @@ func (j *Registry) Delete(s *Syncer) {
 // jobrunner, but there isn't anything to prevent you from creating more than
 // one.
 type Executor struct {
-	Registry *Registry
+	Registry Registry
 }
 
 // NewExecutor creates a new instance of Executor and returns a pointer to
@@ -507,7 +465,7 @@ func (j *Executor) Execute(s *Syncer) {
 		monitorJobState(s, done, abort)
 		go func() {
 			defer s.Quit()
-			defer j.Registry.Delete(s)
+			defer j.Registry.Delete(s.UUID)
 			select {
 			case err := <-done:
 				if s.Killed { //Job killed

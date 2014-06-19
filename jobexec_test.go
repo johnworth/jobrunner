@@ -298,12 +298,7 @@ func TestRegistryRegister(t *testing.T) {
 	r := NewRegistry()
 	s := NewSyncer()
 	r.Register("testing", s)
-	foundsyncer := false
-	for k, v := range r.Registry {
-		if k == "testing" && v == s {
-			foundsyncer = true
-		}
-	}
+	foundsyncer := r.HasKey("testing")
 	if !foundsyncer {
 		t.Fail()
 	}
@@ -335,7 +330,7 @@ func TestRegistryDelete(t *testing.T) {
 	r := NewRegistry()
 	s := NewSyncer()
 	r.Register("testing", s)
-	r.Delete(s)
+	r.Delete("testing")
 	if r.HasKey("testing") {
 		t.Fail()
 	}
