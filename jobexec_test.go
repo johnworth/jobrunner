@@ -196,7 +196,6 @@ func TestOutputReaderRead7(t *testing.T) {
 
 func TestOutputRegistryListenSetter(t *testing.T) {
 	r := NewOutputRegistry()
-	r.Listen()
 	l := r.AddListener()
 	foundlistener := false
 	for p := range r.Registry {
@@ -211,7 +210,6 @@ func TestOutputRegistryListenSetter(t *testing.T) {
 
 func TestOutputRegistryRemove(t *testing.T) {
 	r := NewOutputRegistry()
-	r.Listen()
 	l := r.AddListener()
 	r.RemoveListener(l)
 	foundlistener := false
@@ -227,7 +225,6 @@ func TestOutputRegistryRemove(t *testing.T) {
 
 func TestOutputRegistryInput(t *testing.T) {
 	r := NewOutputRegistry()
-	r.Listen()
 	l := r.AddListener()
 	testbytes := []byte("testing")
 	r.Input <- testbytes
@@ -239,7 +236,6 @@ func TestOutputRegistryInput(t *testing.T) {
 
 func TestOutputRegistryInput2(t *testing.T) {
 	r := NewOutputRegistry()
-	r.Listen()
 	l1 := r.AddListener()
 	l2 := r.AddListener()
 	testbytes := []byte("testing")
@@ -300,7 +296,6 @@ func TestSyncerWrite(t *testing.T) {
 
 func TestRegistryRegister(t *testing.T) {
 	r := NewRegistry()
-	r.Listen()
 	s := NewSyncer()
 	r.Register("testing", s)
 	foundsyncer := false
@@ -316,7 +311,6 @@ func TestRegistryRegister(t *testing.T) {
 
 func TestRegistryGet(t *testing.T) {
 	r := NewRegistry()
-	r.Listen()
 	s := NewSyncer()
 	r.Register("testing", s)
 	get := r.Get("testing")
@@ -327,7 +321,6 @@ func TestRegistryGet(t *testing.T) {
 
 func TestRegistryHasKey(t *testing.T) {
 	r := NewRegistry()
-	r.Listen()
 	s := NewSyncer()
 	r.Register("testing", s)
 	if !r.HasKey("testing") {
@@ -340,7 +333,6 @@ func TestRegistryHasKey(t *testing.T) {
 
 func TestRegistryDelete(t *testing.T) {
 	r := NewRegistry()
-	r.Listen()
 	s := NewSyncer()
 	r.Register("testing", s)
 	r.Delete(s)
@@ -351,7 +343,6 @@ func TestRegistryDelete(t *testing.T) {
 
 func TestRegistryList(t *testing.T) {
 	r := NewRegistry()
-	r.Listen()
 	s := NewSyncer()
 	r.Register("testing", s)
 	r.Register("testing2", s)

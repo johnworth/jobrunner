@@ -141,13 +141,15 @@ type OutputRegistry struct {
 
 // NewOutputRegistry returns a pointer to a new instance of OutputRegistry.
 func NewOutputRegistry() *OutputRegistry {
-	return &OutputRegistry{
+	l := &OutputRegistry{
 		Input:       make(chan []byte),
 		Setter:      make(chan *OutputListener),
 		Remove:      make(chan *OutputListener),
 		Registry:    make(map[*OutputListener]chan []byte),
 		QuitChannel: make(chan *OutputQuitMsg),
 	}
+	l.Listen()
+	return l
 }
 
 // Listen fires off a goroutine that can be communicated with through the Input,
@@ -302,13 +304,15 @@ type Registry struct {
 // NewRegistry creates a new instance of Registry and returns a pointer to
 // it. Does not make sure that only one instance is created.
 func NewRegistry() *Registry {
-	return &Registry{
+	r := &Registry{
 		Setter:   make(chan *RegistrySetMsg),
 		Getter:   make(chan *RegistryGetMsg),
 		Remove:   make(chan *RegistryRemoveMsg),
 		Lister:   make(chan *RegistryListMsg),
 		Registry: make(map[string]*Syncer),
 	}
+	r.Listen()
+	return r
 }
 
 // Listen launches a goroutine that can be communicated with via the setter
@@ -418,7 +422,6 @@ func NewExecutor() *Executor {
 	e := &Executor{
 		Registry: NewRegistry(),
 	}
-	e.Registry.Listen()
 	return e
 }
 
