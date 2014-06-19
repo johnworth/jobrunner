@@ -29,7 +29,7 @@ func getOutputReader() *OutputReader {
 func TestOutputReaderQuitChannel(t *testing.T) {
 	r := getOutputReader()
 	r.Quit()
-	if !r.EOF {
+	if !r.eof {
 		t.Fail()
 	}
 }
@@ -37,7 +37,7 @@ func TestOutputReaderQuitChannel(t *testing.T) {
 func TestOutputReaderListernQuit(t *testing.T) {
 	r := getOutputReader()
 	r.listener.Quit <- 1
-	if !r.EOF {
+	if !r.eof {
 		t.Fail()
 	}
 }

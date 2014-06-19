@@ -51,8 +51,8 @@ type OutputReader struct {
 	accum       []byte
 	listener    *OutputListener
 	m           *sync.Mutex
-	QuitChannel chan int
-	EOF         bool
+	quitChannel chan int
+	eof         bool
 }
 
 // NewOutputReader will create a new OutputReader with the given
@@ -62,8 +62,8 @@ func NewOutputReader(l *OutputListener) *OutputReader {
 		accum:       make([]byte, 0),
 		listener:    l,
 		m:           &sync.Mutex{},
-		QuitChannel: make(chan int),
-		EOF:         false,
+		quitChannel: make(chan int),
+		eof:         false,
 	}
 	go r.run()
 	return r
@@ -80,12 +80,12 @@ func (r *OutputReader) run() {
 			r.m.Unlock()
 		case <-r.listener.Quit: //Quit if the listener tells us to.
 			r.m.Lock()
-			r.EOF = true
+			r.eof = true
 			r.m.Unlock()
 			break
-		case <-r.QuitChannel: //Quit if a caller tells us to.
+		case <-r.quitChannel: //Quit if a caller tells us to.
 			r.m.Lock()
-			r.EOF = true
+			r.eof = true
 			r.m.Unlock()
 			break
 		}
@@ -97,7 +97,7 @@ func (r *OutputReader) run() {
 func (r *OutputReader) Read(p []byte) (n int, err error) {
 	r.m.Lock()
 	defer r.m.Unlock()
-	if r.EOF && len(r.accum) == 0 {
+	if r.eof && len(r.accum) == 0 {
 		return 0, io.EOF
 	}
 	if len(r.accum) == 0 {
@@ -107,14 +107,14 @@ func (r *OutputReader) Read(p []byte) (n int, err error) {
 	if len(r.accum) <= len(p) {
 		bytesRead = copy(p, r.accum)
 		r.accum = make([]byte, 0)
-		if r.EOF {
+		if r.eof {
 			return bytesRead, io.EOF
 		}
 		return bytesRead, nil
 	}
 	bytesRead = copy(p, r.accum)
 	r.accum = r.accum[bytesRead:]
-	if r.EOF && (len(r.accum) <= 0) {
+	if r.eof && (len(r.accum) <= 0) {
 		return bytesRead, io.EOF
 	}
 	return bytesRead, nil
@@ -124,9 +124,9 @@ func (r *OutputReader) Read(p []byte) (n int, err error) {
 // Quit will tell the goroutine that pushes data into the buffer to quit.
 func (r *OutputReader) Quit() {
 	r.m.Lock()
-	r.EOF = true
+	r.eof = true
 	r.m.Unlock()
-	r.QuitChannel <- 1
+	r.quitChannel <- 1
 }
 
 // outputRegistry contains a list of channels that accept []byte's. Each job
