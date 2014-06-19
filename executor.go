@@ -17,13 +17,6 @@ func exitCode(cmd *exec.Cmd) int {
 	return cmd.ProcessState.Sys().(syscall.WaitStatus).ExitStatus()
 }
 
-// OutputQuitMsg is sent to the OutputRegistry on the Quit channel when
-// a job completes. The OutputRegistry then tells all of the registered
-// OutputListeners to quit.
-type OutputQuitMsg struct {
-	Latch chan int
-}
-
 // OutputListener is the message struct for the Setter and Remove channels
 // in a OutputRegistry instance. The Listener is the channel that job outputs
 // are sent out on. The Latch channel is used for synchronizing the
