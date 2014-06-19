@@ -134,51 +134,69 @@ func (r *OutputReader) Quit() {
 // the job's Syncer instance, which in turn is referred to within the the
 // Registry.
 type outputRegistry struct {
-	Input       chan []byte
-	setter      chan *OutputListener
-	remove      chan *OutputListener
-	registry    map[*OutputListener]chan []byte
-	QuitChannel chan *OutputQuitMsg
+	commands chan outputRegistryCmd
+	Input    chan []byte
+}
+
+type outputRegistryAction int
+
+const (
+	registrySet outputRegistryAction = iota
+	registryRemove
+	registryFind
+	registryQuit
+)
+
+type outputRegistryCmd struct {
+	action outputRegistryAction
+	key    *OutputListener
+	value  chan []byte
+	result chan interface{}
+}
+
+type outputRegistryFindResult struct {
+	found bool
+	value chan []byte
 }
 
 // NewOutputRegistry returns a pointer to a new instance of OutputRegistry.
 func NewOutputRegistry() *outputRegistry {
 	l := &outputRegistry{
-		Input:       make(chan []byte),
-		setter:      make(chan *OutputListener),
-		remove:      make(chan *OutputListener),
-		registry:    make(map[*OutputListener]chan []byte),
-		QuitChannel: make(chan *OutputQuitMsg),
+		commands: make(chan outputRegistryCmd),
+		Input:    make(chan []byte),
 	}
-	l.run()
+	go l.run()
 	return l
 }
 
 // Listen fires off a goroutine that can be communicated with through the Input,
 // Setter, and Remove channels.
 func (o *outputRegistry) run() {
-	go func() {
-		for {
-			select {
-			case a := <-o.setter: //Adding a Listener
-				o.registry[a] = a.Listener
-				a.Latch <- 1
-			case buf := <-o.Input: //Demuxing the output to the listeners
-				for _, ch := range o.registry {
-					ch <- buf
-				}
-			case rem := <-o.remove: //Removing a listener
-				delete(o.registry, rem)
-				rem.Latch <- 1
-			case q := <-o.QuitChannel: //Demuxing a Quit command to the listeners.
-				for l := range o.registry {
+	registry := make(map[*OutputListener]chan []byte)
+	for {
+		select {
+		case command := <-o.commands:
+			switch command.action {
+			case registrySet:
+				registry[command.key] = command.value
+			case registryRemove:
+				delete(registry, command.key)
+				command.result <- 1
+			case registryFind:
+				val, ok := registry[command.key]
+				command.result <- outputRegistryFindResult{found: ok, value: val}
+			case registryQuit:
+				for l := range registry {
 					l.Quit <- 1
 				}
-				q.Latch <- 1
-				break
+				close(o.commands)
+			}
+		case buf := <-o.Input: //Demuxing the output to the listeners
+			for _, ch := range registry {
+				ch <- buf
 			}
 		}
-	}()
+	}
 }
 
 // AddListener creates a OutputListener, adds it to the OutputRegistry,
@@ -193,8 +211,7 @@ func (o *outputRegistry) AddListener() *OutputListener {
 		Quit:       make(chan int),
 		readBuffer: make([]byte, 0),
 	}
-	o.setter <- adder
-	<-latch
+	o.commands <- outputRegistryCmd{key: adder, value: listener, action: registrySet}
 	return adder
 }
 
@@ -202,17 +219,23 @@ func (o *outputRegistry) AddListener() *OutputListener {
 // OutputRegistry. Synchronizes with the JobOuputRegistry goroutine through
 // the OutputListener's Latch channel. Does not close any channels.
 func (o *outputRegistry) RemoveListener(l *OutputListener) {
-	o.remove <- l
-	<-l.Latch
+	reply := make(chan interface{})
+	cmd := outputRegistryCmd{key: l, action: registryRemove, result: reply}
+	o.commands <- cmd
+	<-reply
+}
+
+func (o *outputRegistry) HasKey(l *OutputListener) bool {
+	reply := make(chan interface{})
+	cmd := outputRegistryCmd{key: l, action: registryFind, result: reply}
+	o.commands <- cmd
+	result := (<-reply).(outputRegistryFindResult)
+	return result.found
 }
 
 // Quit tells the OutputRegistry's goroutine to exit.
 func (o *outputRegistry) Quit() {
-	msg := &OutputQuitMsg{
-		Latch: make(chan int),
-	}
-	o.QuitChannel <- msg
-	<-msg.Latch
+	o.commands <- outputRegistryCmd{action: registryQuit}
 }
 
 // Syncer contains channels that can be used to communicate with a job

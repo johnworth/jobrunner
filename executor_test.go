@@ -197,13 +197,7 @@ func TestOutputReaderRead7(t *testing.T) {
 func TestOutputRegistryListenSetter(t *testing.T) {
 	r := NewOutputRegistry()
 	l := r.AddListener()
-	foundlistener := false
-	for p := range r.registry {
-		if p == l {
-			foundlistener = true
-		}
-	}
-	if !foundlistener {
+	if !r.HasKey(l) {
 		t.Fail()
 	}
 }
@@ -212,13 +206,7 @@ func TestOutputRegistryRemove(t *testing.T) {
 	r := NewOutputRegistry()
 	l := r.AddListener()
 	r.RemoveListener(l)
-	foundlistener := false
-	for p := range r.registry {
-		if p == l {
-			foundlistener = true
-		}
-	}
-	if foundlistener {
+	if r.HasKey(l) {
 		t.Fail()
 	}
 }
