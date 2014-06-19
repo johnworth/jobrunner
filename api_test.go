@@ -34,6 +34,24 @@ func TestStart(t *testing.T) {
 	}
 }
 
+func slicesEquivalent(s1 []string, s2 []string) bool {
+	if len(s1) != len(s2) {
+		return true
+	}
+	for i := range s1 {
+		foundit := false
+		for j := range s2 {
+			if s1[i] == s2[j] {
+				foundit = true
+			}
+		}
+		if !foundit {
+			return false
+		}
+	}
+	return true
+}
+
 func TestList(t *testing.T) {
 	h := NewAPIHandlers()
 	reqBody := strings.NewReader("{\"CommandLine\":\"while true; do echo $FOO; done\", \"Environment\":{}}")
@@ -77,7 +95,7 @@ func TestList(t *testing.T) {
 	if listmsg.IDs == nil {
 		t.Errorf("No IDs were returned when listing jobs.")
 	}
-	if !reflect.DeepEqual(listmsg.IDs, IDs) {
-		t.Errorf("Job ID lists didn't match.")
+	if !slicesEquivalent(listmsg.IDs, IDs) {
+		t.Errorf("IDs returned by List didn't match.")
 	}
 }
