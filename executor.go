@@ -259,14 +259,14 @@ func NewSyncer() *Syncer {
 }
 
 // Write sends the []byte array passed out on RoutineWriter's OutChannel
-func (j *Syncer) Write(p []byte) (n int, err error) {
-	j.OutputRegistry.Input <- p
+func (s *Syncer) Write(p []byte) (n int, err error) {
+	s.OutputRegistry.Input <- p
 	return len(p), nil
 }
 
 // Quit tells the Syncer to clean up its OutputRegistry
-func (j *Syncer) Quit() {
-	j.OutputRegistry.Quit()
+func (s *Syncer) Quit() {
+	s.OutputRegistry.Quit()
 }
 
 // RegistryCmd represents a command sent to the registry
