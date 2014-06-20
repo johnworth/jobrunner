@@ -225,37 +225,134 @@ func (o *outputRegistry) Quit() {
 // Syncer contains channels that can be used to communicate with a job
 // goroutine. It also contains a pointer to a OutputRegistry.
 type Syncer struct {
+	cmds           chan syncerCmd
 	Command        chan string
 	Environment    chan map[string]string
 	Start          chan int
 	Started        chan int
 	Kill           chan int
-	Killed         bool
+	killed         bool
+	killedLock     *sync.Mutex
 	Output         chan []byte
-	ExitCode       int
+	exitCode       int
+	exitCodeLock   *sync.Mutex
 	Completed      chan int
-	CmdPtr         *exec.Cmd
+	cmdPtr         *exec.Cmd
+	cmdPtrLock     *sync.Mutex
 	OutputRegistry *outputRegistry
 	UUID           string
+	uuidLock       *sync.Mutex
+}
+
+type syncerAction int
+
+const (
+	syncerQuit syncerAction = iota
+)
+
+type syncerCmd struct {
+	action syncerAction
 }
 
 // NewSyncer creates a new instance of Syncer and returns a pointer to it.
 func NewSyncer() *Syncer {
 	s := &Syncer{
+		cmds:           make(chan syncerCmd),
 		Command:        make(chan string),
 		Environment:    make(chan map[string]string),
 		Start:          make(chan int),
 		Started:        make(chan int),
 		Kill:           make(chan int),
-		Killed:         false,
+		killed:         false,
+		killedLock:     &sync.Mutex{},
 		Output:         make(chan []byte),
-		ExitCode:       -9000,
+		exitCode:       -9000,
+		exitCodeLock:   &sync.Mutex{},
 		Completed:      make(chan int),
-		CmdPtr:         nil,
+		cmdPtr:         nil,
+		cmdPtrLock:     &sync.Mutex{},
 		OutputRegistry: NewOutputRegistry(),
 		UUID:           "",
+		uuidLock:       &sync.Mutex{},
 	}
+	go s.run()
 	return s
+}
+
+func (s *Syncer) run() {
+	select {
+	case <-s.cmds:
+		s.OutputRegistry.Quit()
+		close(s.cmds)
+
+	}
+}
+
+// SetKilled sets the killed field for a Syncer. Should be threadsafe.
+func (s *Syncer) SetKilled(k bool) {
+	s.killedLock.Lock()
+	s.killed = k
+	s.killedLock.Unlock()
+}
+
+// GetKilled gets the killed field for a Syncer. Should be threadsafe.
+func (s *Syncer) GetKilled() bool {
+	var retval bool
+	s.killedLock.Lock()
+	retval = s.killed
+	s.killedLock.Unlock()
+	return retval
+}
+
+// SetExitCode sets the exitCode field for a Syncer. Should be threadsafe.
+func (s *Syncer) SetExitCode(e int) {
+	s.exitCodeLock.Lock()
+	s.exitCode = e
+	s.exitCodeLock.Unlock()
+}
+
+// GetExitCode gets the exitCode from a Syncer. Should be threadsafe.
+func (s *Syncer) GetExitCode() int {
+	var retval int
+	s.exitCodeLock.Lock()
+	retval = s.exitCode
+	s.exitCodeLock.Unlock()
+	return retval
+}
+
+// SetCmdPtr sets the pointer to an exec.Cmd instance for the Syncer. Should
+// be threadsafe.
+func (s *Syncer) SetCmdPtr(p *exec.Cmd) {
+	s.cmdPtrLock.Lock()
+	s.cmdPtr = p
+	s.cmdPtrLock.Unlock()
+}
+
+// GetCmdPtr gets the pointer to an exec.Cmd instance that's associated with
+// the Syncer. Should be threadsafe, but don't don't mutate any state on the
+// pointer or bad things could happen.
+func (s *Syncer) GetCmdPtr() *exec.Cmd {
+	var retval *exec.Cmd
+	s.cmdPtrLock.Lock()
+	retval = s.cmdPtr
+	s.cmdPtrLock.Unlock()
+	return retval
+}
+
+// SetUUID sets the UUID for a Syncer.
+func (s *Syncer) SetUUID(uuid string) {
+	s.uuidLock.Lock()
+	s.UUID = uuid
+	s.uuidLock.Unlock()
+}
+
+// GetUUID gets the UUID for a Syncer.
+func (s *Syncer) GetUUID() string {
+	var retval string
+	s.uuidLock.Lock()
+	retval = s.UUID
+	s.uuidLock.Unlock()
+	return retval
 }
 
 // Write sends the []byte array passed out on RoutineWriter's OutChannel
@@ -266,7 +363,7 @@ func (s *Syncer) Write(p []byte) (n int, err error) {
 
 // Quit tells the Syncer to clean up its OutputRegistry
 func (s *Syncer) Quit() {
-	s.OutputRegistry.Quit()
+	s.cmds <- syncerCmd{action: syncerQuit}
 }
 
 // RegistryCmd represents a command sent to the registry
@@ -407,27 +504,31 @@ func (j *Executor) Launch(command string, environment map[string]string) string 
 
 func monitorJobState(s *Syncer, done chan<- error, abort <-chan int) {
 	go func() {
+		uuid := s.GetUUID()
 		for {
 			select {
 			case <-s.Kill:
-				s.Killed = true
-				if s.CmdPtr != nil {
-					s.CmdPtr.Process.Kill()
+				s.SetKilled(true)
+				cmdptr := s.GetCmdPtr()
+				if cmdptr != nil {
+					cmdptr.Process.Kill()
 				}
-				log.Printf("Kill signal was sent to job %s.", s.UUID)
+				log.Printf("Kill signal was sent to job %s.", uuid)
 			case <-s.Completed:
-				log.Printf("Job %s completed.", s.UUID)
+				log.Printf("Job %s completed.", uuid)
 				return
 			case <-abort:
-				log.Printf("Abort was sent for job %s.", s.UUID)
+				log.Printf("Abort was sent for job %s.", uuid)
 				return
 			}
 		}
 	}()
 	go func() {
+		cmdptr := s.GetCmdPtr()
+		uuid := s.GetUUID()
 		select {
-		case done <- s.CmdPtr.Wait():
-			log.Printf("Job %s is no longer in the Wait state.", s.UUID)
+		case done <- cmdptr.Wait():
+			log.Printf("Job %s is no longer in the Wait state.", uuid)
 		}
 	}()
 }
@@ -439,6 +540,7 @@ func (j *Executor) Execute(s *Syncer) {
 	go func() {
 		shouldStart := false
 		running := false
+		uuid := s.GetUUID()
 		var cmdString string
 		var environment map[string]string
 		var cmd *exec.Cmd
@@ -458,43 +560,43 @@ func (j *Executor) Execute(s *Syncer) {
 		cmd.Env = formatEnv(environment)
 		cmd.Stdout = s
 		cmd.Stderr = s
-		s.CmdPtr = cmd
+		s.SetCmdPtr(cmd)
 		done := make(chan error)
 		abort := make(chan int)
 		err := cmd.Start()
 		s.Started <- 1
 		if err != nil {
-			s.ExitCode = -1000
+			s.SetExitCode(-1000)
 			abort <- 1
 			return
 		}
-		log.Printf("Started job %s.", s.UUID)
+		log.Printf("Started job %s.", uuid)
 		monitorJobState(s, done, abort)
 		go func() {
 			defer s.Quit()
-			defer j.Registry.Delete(s.UUID)
+			defer j.Registry.Delete(uuid)
 			select {
 			case err := <-done:
-				if s.Killed { //Job killed
-					s.ExitCode = -100
+				if s.GetKilled() { //Job killed
+					s.SetExitCode(-100)
 					s.Completed <- 1
 					return
 				}
-				if err == nil && s.ExitCode == -9000 { //Job exited normally
+				if err == nil && s.GetExitCode() == -9000 { //Job exited normally
 					if cmd.ProcessState != nil {
-						s.ExitCode = exitCode(cmd)
+						s.SetExitCode(exitCode(cmd))
 					} else {
-						s.ExitCode = 0
+						s.SetExitCode(0)
 					}
 				}
 				if err != nil { //job exited badly, but wasn't killed
 					if cmd.ProcessState != nil {
-						s.ExitCode = exitCode(cmd)
+						s.SetExitCode(exitCode(cmd))
 					} else {
-						s.ExitCode = 1
+						s.SetExitCode(1)
 					}
 				}
-				log.Printf("Job %s exited with a status of %d.", s.UUID, s.ExitCode)
+				log.Printf("Job %s exited with a status of %d.", uuid, s.GetExitCode())
 				s.Completed <- 1
 				return
 			}

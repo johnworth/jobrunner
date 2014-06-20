@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"os/exec"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 
 func TestExitCode(t *testing.T) {
 	cmd := exec.Command("echo", "foo")
+	fmt.Println("wut")
 	cmd.Start()
 	cmd.Wait()
 	if exitCode(cmd) != 0 {
@@ -361,7 +363,7 @@ func TestExecutorExecute(t *testing.T) {
 	ec := make(chan int)
 	go func() {
 		<-s.Completed
-		ec <- s.ExitCode
+		ec <- s.GetExitCode()
 	}()
 	e.Execute(s)
 	e.Registry.Register("blippy", s)
@@ -371,6 +373,7 @@ func TestExecutorExecute(t *testing.T) {
 	s.Start <- 1
 	<-s.Started
 	exit := <-ec
+	fmt.Println(exit)
 	if exit != 0 {
 		t.Fail()
 	}
@@ -383,14 +386,14 @@ func TestExecutorKill(t *testing.T) {
 	coord := make(chan int)
 	go func() {
 		<-s.Completed
-		coord <- s.ExitCode
+		coord <- s.GetExitCode()
 	}()
 	e.Kill(jobid)
 	exit := <-coord
 	if exit != -100 {
 		t.Errorf("Exit code for the kill command wasn't -100.")
 	}
-	if !s.Killed {
+	if !s.GetKilled() {
 		t.Errorf("The Syncer.Killed field wasn't false.")
 	}
 	if e.Registry.HasKey(jobid) {
