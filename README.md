@@ -85,7 +85,7 @@ containing the UUID looks like:
 
 ```json
 {
-    {"ID":"09eb8270-0c98-4213-854e-042dc0745dd3"}
+    "ID":"09eb8270-0c98-4213-854e-042dc0745dd3"
 }
 ```
 
