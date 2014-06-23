@@ -295,10 +295,8 @@ func (j *Job) monitorJobState(done chan<- error, abort <-chan int) {
 	}()
 }
 
-func (j *Job) waitForJob(e *Executor, done <-chan error) {
+func (j *Job) waitForJob(done <-chan error) {
 	uuid := j.GetUUID()
-	defer j.Quit()
-	defer e.Registry.Delete(uuid)
 	cmd := j.GetCmdPtr()
 	select {
 	case err := <-done:
@@ -367,6 +365,10 @@ func (e *Executor) Execute(j *Job) {
 		shouldStart := false
 		running := false
 		uuid := j.GetUUID()
+
+		defer j.Quit()
+		defer e.Registry.Delete(uuid)
+
 		var cmdString string
 		var environment map[string]string
 		var cmd *exec.Cmd
@@ -398,7 +400,7 @@ func (e *Executor) Execute(j *Job) {
 		}
 		log.Printf("Started job %s.", uuid)
 		j.monitorJobState(done, abort)
-		j.waitForJob(e, done) //Execute needs to be non-blocking.
+		j.waitForJob(done)
 	}()
 }
 
