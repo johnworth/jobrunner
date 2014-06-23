@@ -398,7 +398,7 @@ func (e *Executor) Execute(j *Job) {
 		}
 		log.Printf("Started job %s.", uuid)
 		j.monitorJobState(done, abort)
-		go j.waitForJob(e, done) //Execute needs to be non-blocking.
+		j.waitForJob(e, done) //Execute needs to be non-blocking.
 	}()
 }
 
