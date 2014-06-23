@@ -125,6 +125,8 @@ func (r *OutputReader) Quit() {
 type Job struct {
 	cmds           chan jobCmd
 	Command        chan string
+	done           chan error
+	abort          chan int
 	Environment    chan map[string]string
 	Start          chan int
 	Started        chan int
@@ -157,6 +159,8 @@ func NewJob() *Job {
 	j := &Job{
 		cmds:           make(chan jobCmd),
 		Command:        make(chan string),
+		done:           make(chan error),
+		abort:          make(chan int),
 		Environment:    make(chan map[string]string),
 		Start:          make(chan int),
 		Started:        make(chan int),
@@ -264,7 +268,7 @@ func (j *Job) Quit() {
 	j.cmds <- jobCmd{action: jobQuit}
 }
 
-func (j *Job) monitorJobState(done chan<- error, abort <-chan int) {
+func (j *Job) monitorJobState() {
 	go func() {
 		uuid := j.GetUUID()
 		for {
@@ -279,7 +283,7 @@ func (j *Job) monitorJobState(done chan<- error, abort <-chan int) {
 			case <-j.Completed:
 				log.Printf("Job %s completed.", uuid)
 				return
-			case <-abort:
+			case <-j.abort:
 				log.Printf("Abort was sent for job %s.", uuid)
 				return
 			}
@@ -289,17 +293,18 @@ func (j *Job) monitorJobState(done chan<- error, abort <-chan int) {
 		cmdptr := j.GetCmdPtr()
 		uuid := j.GetUUID()
 		select {
-		case done <- cmdptr.Wait():
+		case j.done <- cmdptr.Wait():
 			log.Printf("Job %s is no longer in the Wait state.", uuid)
 		}
 	}()
 }
 
-func (j *Job) waitForJob(done <-chan error) {
+func (j *Job) waitForJob() {
+	defer j.Quit()
 	uuid := j.GetUUID()
 	cmd := j.GetCmdPtr()
 	select {
-	case err := <-done:
+	case err := <-j.done:
 		if j.GetKilled() { //Job killed
 			j.SetExitCode(-100)
 			j.Completed <- 1
@@ -323,6 +328,40 @@ func (j *Job) waitForJob(done <-chan error) {
 		j.Completed <- 1
 		return
 	}
+}
+
+func (j *Job) start() {
+	shouldStart := false
+	running := false
+
+	var cmdString string
+	var environment map[string]string
+	var cmd *exec.Cmd
+	for {
+		select {
+		case cmdString = <-j.Command:
+		case environment = <-j.Environment:
+		case <-j.Start:
+			shouldStart = true
+		}
+
+		if cmdString != "" && environment != nil && shouldStart && !running {
+			break
+		}
+	}
+	cmd = exec.Command("bash", "-c", cmdString)
+	cmd.Env = formatEnv(environment)
+	cmd.Stdout = j
+	cmd.Stderr = j
+	j.SetCmdPtr(cmd)
+	err := cmd.Start()
+	j.Started <- 1
+	if err != nil {
+		j.SetExitCode(-1000)
+		j.abort <- 1
+		return
+	}
+	log.Printf("Started job %s.", j.GetUUID())
 }
 
 // Executor maintains a reference to a Registry and is able to launch
@@ -362,45 +401,11 @@ func (e *Executor) Launch(command string, environment map[string]string) string 
 func (e *Executor) Execute(j *Job) {
 	log.Printf("Executing job %s.", j.UUID)
 	go func() {
-		shouldStart := false
-		running := false
 		uuid := j.GetUUID()
-
-		defer j.Quit()
 		defer e.Registry.Delete(uuid)
-
-		var cmdString string
-		var environment map[string]string
-		var cmd *exec.Cmd
-		for {
-			select {
-			case cmdString = <-j.Command:
-			case environment = <-j.Environment:
-			case <-j.Start:
-				shouldStart = true
-			}
-
-			if cmdString != "" && environment != nil && shouldStart && !running {
-				break
-			}
-		}
-		cmd = exec.Command("bash", "-c", cmdString)
-		cmd.Env = formatEnv(environment)
-		cmd.Stdout = j
-		cmd.Stderr = j
-		j.SetCmdPtr(cmd)
-		done := make(chan error)
-		abort := make(chan int)
-		err := cmd.Start()
-		j.Started <- 1
-		if err != nil {
-			j.SetExitCode(-1000)
-			abort <- 1
-			return
-		}
-		log.Printf("Started job %s.", uuid)
-		j.monitorJobState(done, abort)
-		j.waitForJob(done)
+		j.start()
+		j.monitorJobState()
+		j.waitForJob()
 	}()
 }
 
