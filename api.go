@@ -149,23 +149,12 @@ func (h *APIHandlers) SetupRouter() *mux.Router {
 	return r
 }
 
-// launchExpvarServer starts up a goroutine for handling expvar requests.
-func (h *APIHandlers) launchExpvarServer(port string) {
-	go func() {
-		expserver := &http.Server{
-			Addr: port,
-		}
-		log.Fatal(expserver.ListenAndServe())
-	}()
-}
-
 // NewServer calls setupRouter(), constructs a server and fires it up.
-func (h *APIHandlers) NewServer() *http.Server {
-	h.launchExpvarServer(":8081")
+func (h *APIHandlers) NewServer(conf *Config) *http.Server {
 	m := h.SetupRouter()
+	http.Handle("/", m)
 	s := &http.Server{
-		Addr:    ":8080",
-		Handler: m,
+		Addr: conf.Host,
 	}
 	log.Println("Returning server")
 	return s
