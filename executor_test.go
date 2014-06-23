@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"reflect"
 	"testing"
+
+	"code.google.com/p/go-uuid/uuid"
 )
 
 func TestExitCode(t *testing.T) {
@@ -274,6 +276,68 @@ func TestJobWrite(t *testing.T) {
 		t.Fail()
 	}
 	if !reflect.DeepEqual(recv2, testbytes) {
+		t.Fail()
+	}
+}
+
+func TestJobGetKilled(t *testing.T) {
+	j := NewJob()
+	if j.GetKilled() {
+		t.Fail()
+	}
+}
+
+func TestJobSetKilled(t *testing.T) {
+	j := NewJob()
+	j.SetKilled(true)
+	if !j.GetKilled() {
+		t.Fail()
+	}
+}
+
+func TestGetExitCode(t *testing.T) {
+	j := NewJob()
+	if j.GetExitCode() != -9000 {
+		t.Fail()
+	}
+}
+
+func TestSetExitCode(t *testing.T) {
+	j := NewJob()
+	j.SetExitCode(1)
+	if j.GetExitCode() != 1 {
+		t.Fail()
+	}
+}
+
+func TestGetCmdPtr(t *testing.T) {
+	j := NewJob()
+	if j.GetCmdPtr() != nil {
+		t.Fail()
+	}
+}
+
+func TestSetCmdPtr(t *testing.T) {
+	j := NewJob()
+	c := exec.Command("echo", "true")
+	j.SetCmdPtr(c)
+	if j.GetCmdPtr() != c {
+		t.Fail()
+	}
+}
+
+func TestGetUUID(t *testing.T) {
+	j := NewJob()
+	if j.GetUUID() != "" {
+		t.Fail()
+	}
+}
+
+func TestSetUUID(t *testing.T) {
+	j := NewJob()
+	u := uuid.New()
+	j.SetUUID(u)
+	if j.GetUUID() != u {
 		t.Fail()
 	}
 }
