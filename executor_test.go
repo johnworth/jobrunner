@@ -10,7 +10,6 @@ import (
 
 func TestExitCode(t *testing.T) {
 	cmd := exec.Command("echo", "foo")
-	fmt.Println("wut")
 	cmd.Start()
 	cmd.Wait()
 	if exitCode(cmd) != 0 {
