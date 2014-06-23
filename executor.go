@@ -128,8 +128,8 @@ type Job struct {
 	done           chan error
 	abort          chan int
 	Environment    chan map[string]string
-	Start          chan int
-	Started        chan int
+	Begin          chan int
+	Began          chan int
 	Kill           chan int
 	killed         bool
 	killedLock     *sync.Mutex
@@ -162,8 +162,8 @@ func NewJob() *Job {
 		done:           make(chan error),
 		abort:          make(chan int),
 		Environment:    make(chan map[string]string),
-		Start:          make(chan int),
-		Started:        make(chan int),
+		Begin:          make(chan int),
+		Began:          make(chan int),
 		Kill:           make(chan int),
 		killed:         false,
 		killedLock:     &sync.Mutex{},
@@ -268,7 +268,10 @@ func (j *Job) Quit() {
 	j.cmds <- jobCmd{action: jobQuit}
 }
 
-func (j *Job) monitorJobState() {
+// MonitorState fires off two goroutines: one that waits for a message on the
+// Kill, Completed, or abort channels, and another one that calls Wait() on
+// the command that's running and.
+func (j *Job) MonitorState() {
 	go func() {
 		uuid := j.GetUUID()
 		for {
@@ -299,7 +302,8 @@ func (j *Job) monitorJobState() {
 	}()
 }
 
-func (j *Job) waitForJob() {
+// Wait blocks until the running job is completed.
+func (j *Job) Wait() {
 	defer j.Quit()
 	uuid := j.GetUUID()
 	cmd := j.GetCmdPtr()
@@ -330,7 +334,8 @@ func (j *Job) waitForJob() {
 	}
 }
 
-func (j *Job) start() {
+// Start gets the job running.
+func (j *Job) Start() {
 	shouldStart := false
 	running := false
 
@@ -341,7 +346,7 @@ func (j *Job) start() {
 		select {
 		case cmdString = <-j.Command:
 		case environment = <-j.Environment:
-		case <-j.Start:
+		case <-j.Begin:
 			shouldStart = true
 		}
 
@@ -355,13 +360,23 @@ func (j *Job) start() {
 	cmd.Stderr = j
 	j.SetCmdPtr(cmd)
 	err := cmd.Start()
-	j.Started <- 1
+	j.Began <- 1
 	if err != nil {
 		j.SetExitCode(-1000)
 		j.abort <- 1
 		return
 	}
 	log.Printf("Started job %s.", j.GetUUID())
+}
+
+// Prepare allows the caller to set the command and environment for the job.
+func (j *Job) Prepare(command string, environment map[string]string) {
+	go func() {
+		j.Command <- command
+		j.Environment <- environment
+		j.Begin <- 1
+		<-j.Began
+	}()
 }
 
 // Executor maintains a reference to a Registry and is able to launch
@@ -388,11 +403,8 @@ func (e *Executor) Launch(command string, environment map[string]string) string 
 	job.UUID = jobID
 	e.Registry.Register(jobID, job)
 	log.Printf("Registering job %s.", jobID)
+	job.Prepare(command, environment)
 	e.Execute(job)
-	job.Command <- command
-	job.Environment <- environment
-	job.Start <- 1
-	<-job.Started
 	return jobID
 }
 
@@ -403,9 +415,9 @@ func (e *Executor) Execute(j *Job) {
 	go func() {
 		uuid := j.GetUUID()
 		defer e.Registry.Delete(uuid)
-		j.start()
-		j.monitorJobState()
-		j.waitForJob()
+		j.Start()
+		j.MonitorState()
+		j.Wait()
 	}()
 }
 

@@ -369,8 +369,8 @@ func TestExecutorExecute(t *testing.T) {
 	s.UUID = "blippy"
 	s.Command <- "echo $FOO"
 	s.Environment <- map[string]string{"FOO": "BAR"}
-	s.Start <- 1
-	<-s.Started
+	s.Begin <- 1
+	<-s.Began
 	exit := <-ec
 	fmt.Println(exit)
 	if exit != 0 {
