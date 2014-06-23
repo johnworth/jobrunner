@@ -124,19 +124,19 @@ func (r *OutputReader) Quit() {
 // goroutine. It also contains a pointer to a OutputRegistry.
 type Job struct {
 	cmds           chan jobCmd
-	Command        chan string
+	command        chan string
 	done           chan error
 	abort          chan int
-	Environment    chan map[string]string
-	Begin          chan int
-	Began          chan int
-	Kill           chan int
+	environment    chan map[string]string
+	begin          chan int
+	began          chan int
+	kill           chan int
 	killed         bool
 	killedLock     *sync.Mutex
 	Output         chan []byte
 	exitCode       int
 	exitCodeLock   *sync.Mutex
-	Completed      chan int
+	completed      chan int
 	cmdPtr         *exec.Cmd
 	cmdPtrLock     *sync.Mutex
 	OutputRegistry *outputRegistry
@@ -158,19 +158,19 @@ type jobCmd struct {
 func NewJob() *Job {
 	j := &Job{
 		cmds:           make(chan jobCmd),
-		Command:        make(chan string),
+		command:        make(chan string),
 		done:           make(chan error),
 		abort:          make(chan int),
-		Environment:    make(chan map[string]string),
-		Begin:          make(chan int),
-		Began:          make(chan int),
-		Kill:           make(chan int),
+		environment:    make(chan map[string]string),
+		begin:          make(chan int),
+		began:          make(chan int),
+		kill:           make(chan int),
 		killed:         false,
 		killedLock:     &sync.Mutex{},
 		Output:         make(chan []byte),
 		exitCode:       -9000,
 		exitCodeLock:   &sync.Mutex{},
-		Completed:      make(chan int),
+		completed:      make(chan int),
 		cmdPtr:         nil,
 		cmdPtrLock:     &sync.Mutex{},
 		OutputRegistry: NewOutputRegistry(),
@@ -276,14 +276,14 @@ func (j *Job) MonitorState() {
 		uuid := j.GetUUID()
 		for {
 			select {
-			case <-j.Kill:
+			case <-j.kill:
 				j.SetKilled(true)
 				cmdptr := j.GetCmdPtr()
 				if cmdptr != nil {
 					cmdptr.Process.Kill()
 				}
 				log.Printf("Kill signal was sent to job %s.", uuid)
-			case <-j.Completed:
+			case <-j.completed:
 				log.Printf("Job %s completed.", uuid)
 				return
 			case <-j.abort:
@@ -311,7 +311,7 @@ func (j *Job) Wait() {
 	case err := <-j.done:
 		if j.GetKilled() { //Job killed
 			j.SetExitCode(-100)
-			j.Completed <- 1
+			j.completed <- 1
 			return
 		}
 		if err == nil && j.GetExitCode() == -9000 { //Job exited normally
@@ -329,7 +329,7 @@ func (j *Job) Wait() {
 			}
 		}
 		log.Printf("Job %s exited with a status of %d.", uuid, j.GetExitCode())
-		j.Completed <- 1
+		j.completed <- 1
 		return
 	}
 }
@@ -344,9 +344,9 @@ func (j *Job) Start() {
 	var cmd *exec.Cmd
 	for {
 		select {
-		case cmdString = <-j.Command:
-		case environment = <-j.Environment:
-		case <-j.Begin:
+		case cmdString = <-j.command:
+		case environment = <-j.environment:
+		case <-j.begin:
 			shouldStart = true
 		}
 
@@ -360,7 +360,7 @@ func (j *Job) Start() {
 	cmd.Stderr = j
 	j.SetCmdPtr(cmd)
 	err := cmd.Start()
-	j.Began <- 1
+	j.began <- 1
 	if err != nil {
 		j.SetExitCode(-1000)
 		j.abort <- 1
@@ -372,11 +372,16 @@ func (j *Job) Start() {
 // Prepare allows the caller to set the command and environment for the job.
 func (j *Job) Prepare(command string, environment map[string]string) {
 	go func() {
-		j.Command <- command
-		j.Environment <- environment
-		j.Begin <- 1
-		<-j.Began
+		j.command <- command
+		j.environment <- environment
+		j.begin <- 1
+		<-j.began
 	}()
+}
+
+// Kill allows the caller to kill the job.
+func (j *Job) Kill() {
+	j.kill <- 1
 }
 
 // Executor maintains a reference to a Registry and is able to launch
@@ -425,7 +430,7 @@ func (e *Executor) Execute(j *Job) {
 func (e *Executor) Kill(uuid string) {
 	if e.Registry.HasKey(uuid) {
 		job := e.Registry.Get(uuid)
-		job.Kill <- 1
+		job.Kill()
 	}
 }
 

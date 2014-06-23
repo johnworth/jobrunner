@@ -361,16 +361,16 @@ func TestExecutorExecute(t *testing.T) {
 	s := NewJob()
 	ec := make(chan int)
 	go func() {
-		<-s.Completed
+		<-s.completed
 		ec <- s.GetExitCode()
 	}()
 	e.Execute(s)
 	e.Registry.Register("blippy", s)
 	s.UUID = "blippy"
-	s.Command <- "echo $FOO"
-	s.Environment <- map[string]string{"FOO": "BAR"}
-	s.Begin <- 1
-	<-s.Began
+	s.command <- "echo $FOO"
+	s.environment <- map[string]string{"FOO": "BAR"}
+	s.begin <- 1
+	<-s.began
 	exit := <-ec
 	fmt.Println(exit)
 	if exit != 0 {
@@ -384,7 +384,7 @@ func TestExecutorKill(t *testing.T) {
 	s := e.Registry.Get(jobid)
 	coord := make(chan int)
 	go func() {
-		<-s.Completed
+		<-s.completed
 		coord <- s.GetExitCode()
 	}()
 	e.Kill(jobid)
