@@ -154,7 +154,7 @@ type jobCmd struct {
 
 // NewJob creates a new instance of Job and returns a pointer to it.
 func NewJob() *Job {
-	s := &Job{
+	j := &Job{
 		cmds:           make(chan jobCmd),
 		Command:        make(chan string),
 		Environment:    make(chan map[string]string),
@@ -173,8 +173,8 @@ func NewJob() *Job {
 		UUID:           "",
 		uuidLock:       &sync.Mutex{},
 	}
-	go s.run()
-	return s
+	go j.run()
+	return j
 }
 
 func (j *Job) run() {
@@ -329,20 +329,20 @@ func (e *Executor) Launch(command string, environment map[string]string) string 
 
 // Execute starts up a goroutine that communicates via a Job and will
 // eventually execute a job.
-func (e *Executor) Execute(s *Job) {
-	log.Printf("Executing job %s.", s.UUID)
+func (e *Executor) Execute(j *Job) {
+	log.Printf("Executing job %s.", j.UUID)
 	go func() {
 		shouldStart := false
 		running := false
-		uuid := s.GetUUID()
+		uuid := j.GetUUID()
 		var cmdString string
 		var environment map[string]string
 		var cmd *exec.Cmd
 		for {
 			select {
-			case cmdString = <-s.Command:
-			case environment = <-s.Environment:
-			case <-s.Start:
+			case cmdString = <-j.Command:
+			case environment = <-j.Environment:
+			case <-j.Start:
 				shouldStart = true
 			}
 
@@ -352,46 +352,46 @@ func (e *Executor) Execute(s *Job) {
 		}
 		cmd = exec.Command("bash", "-c", cmdString)
 		cmd.Env = formatEnv(environment)
-		cmd.Stdout = s
-		cmd.Stderr = s
-		s.SetCmdPtr(cmd)
+		cmd.Stdout = j
+		cmd.Stderr = j
+		j.SetCmdPtr(cmd)
 		done := make(chan error)
 		abort := make(chan int)
 		err := cmd.Start()
-		s.Started <- 1
+		j.Started <- 1
 		if err != nil {
-			s.SetExitCode(-1000)
+			j.SetExitCode(-1000)
 			abort <- 1
 			return
 		}
 		log.Printf("Started job %s.", uuid)
-		s.monitorJobState(done, abort)
+		j.monitorJobState(done, abort)
 		go func() {
-			defer s.Quit()
+			defer j.Quit()
 			defer e.Registry.Delete(uuid)
 			select {
 			case err := <-done:
-				if s.GetKilled() { //Job killed
-					s.SetExitCode(-100)
-					s.Completed <- 1
+				if j.GetKilled() { //Job killed
+					j.SetExitCode(-100)
+					j.Completed <- 1
 					return
 				}
-				if err == nil && s.GetExitCode() == -9000 { //Job exited normally
+				if err == nil && j.GetExitCode() == -9000 { //Job exited normally
 					if cmd.ProcessState != nil {
-						s.SetExitCode(exitCode(cmd))
+						j.SetExitCode(exitCode(cmd))
 					} else {
-						s.SetExitCode(0)
+						j.SetExitCode(0)
 					}
 				}
 				if err != nil { //job exited badly, but wasn't killed
 					if cmd.ProcessState != nil {
-						s.SetExitCode(exitCode(cmd))
+						j.SetExitCode(exitCode(cmd))
 					} else {
-						s.SetExitCode(1)
+						j.SetExitCode(1)
 					}
 				}
-				log.Printf("Job %s exited with a status of %d.", uuid, s.GetExitCode())
-				s.Completed <- 1
+				log.Printf("Job %s exited with a status of %d.", uuid, j.GetExitCode())
+				j.Completed <- 1
 				return
 			}
 		}()
