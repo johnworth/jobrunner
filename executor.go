@@ -295,6 +295,38 @@ func (j *Job) monitorJobState(done chan<- error, abort <-chan int) {
 	}()
 }
 
+func (j *Job) waitForJob(e *Executor, done <-chan error) {
+	uuid := j.GetUUID()
+	defer j.Quit()
+	defer e.Registry.Delete(uuid)
+	cmd := j.GetCmdPtr()
+	select {
+	case err := <-done:
+		if j.GetKilled() { //Job killed
+			j.SetExitCode(-100)
+			j.Completed <- 1
+			return
+		}
+		if err == nil && j.GetExitCode() == -9000 { //Job exited normally
+			if cmd.ProcessState != nil {
+				j.SetExitCode(exitCode(cmd))
+			} else {
+				j.SetExitCode(0)
+			}
+		}
+		if err != nil { //job exited badly, but wasn't killed
+			if cmd.ProcessState != nil {
+				j.SetExitCode(exitCode(cmd))
+			} else {
+				j.SetExitCode(1)
+			}
+		}
+		log.Printf("Job %s exited with a status of %d.", uuid, j.GetExitCode())
+		j.Completed <- 1
+		return
+	}
+}
+
 // Executor maintains a reference to a Registry and is able to launch
 // jobs. There should only be one instance of Executor per instance of
 // jobrunner, but there isn't anything to prevent you from creating more than
@@ -366,35 +398,7 @@ func (e *Executor) Execute(j *Job) {
 		}
 		log.Printf("Started job %s.", uuid)
 		j.monitorJobState(done, abort)
-		go func() {
-			defer j.Quit()
-			defer e.Registry.Delete(uuid)
-			select {
-			case err := <-done:
-				if j.GetKilled() { //Job killed
-					j.SetExitCode(-100)
-					j.Completed <- 1
-					return
-				}
-				if err == nil && j.GetExitCode() == -9000 { //Job exited normally
-					if cmd.ProcessState != nil {
-						j.SetExitCode(exitCode(cmd))
-					} else {
-						j.SetExitCode(0)
-					}
-				}
-				if err != nil { //job exited badly, but wasn't killed
-					if cmd.ProcessState != nil {
-						j.SetExitCode(exitCode(cmd))
-					} else {
-						j.SetExitCode(1)
-					}
-				}
-				log.Printf("Job %s exited with a status of %d.", uuid, j.GetExitCode())
-				j.Completed <- 1
-				return
-			}
-		}()
+		go j.waitForJob(e, done) //Execute needs to be non-blocking.
 	}()
 }
 
