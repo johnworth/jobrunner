@@ -342,6 +342,61 @@ func TestSetUUID(t *testing.T) {
 	}
 }
 
+func TestPrepare(t *testing.T) {
+	j := NewJob()
+	var c string
+	var e map[string]string
+	go func() {
+		c = <-j.command
+		e = <-j.environment
+		<-j.begin
+		j.began <- 1
+	}()
+	j.Prepare("foobar", map[string]string{"foo": "bar"})
+	<-j.began
+	if c != "foobar" {
+		t.Errorf("The command was not set to %s.", "foobar")
+	}
+	if !reflect.DeepEqual(e, map[string]string{"foo": "bar"}) {
+		t.Errorf("The environment was not set to {\"foo\":\"bar\"}.")
+	}
+}
+
+func TestJobStart(t *testing.T) {
+	j := NewJob()
+	j.Prepare("echo foo", map[string]string{})
+	j.Start()
+	j.MonitorState()
+	if j.GetCmdPtr() == nil {
+		t.Errorf("Start resulted in a nil CmdPtr.")
+	}
+}
+
+func TestMonitorState1(t *testing.T) {
+	j := NewJob()
+	j.Prepare("while true; do echo 1; done", map[string]string{})
+	j.Start()
+	j.MonitorState()
+	j.Kill()
+	if !j.GetKilled() {
+		t.Fail()
+	}
+}
+
+func TestJobWait(t *testing.T) {
+	j := NewJob()
+	j.Prepare("echo true", map[string]string{})
+	j.Start()
+	j.MonitorState()
+	j.Wait()
+	if j.GetKilled() {
+		t.Fail()
+	}
+	if j.GetExitCode() == -9000 {
+		t.Fail()
+	}
+}
+
 func TestRegistryRegister(t *testing.T) {
 	r := NewRegistry()
 	s := NewJob()
@@ -409,7 +464,6 @@ func TestRegistryList(t *testing.T) {
 	if !found1 || !found2 || !found3 {
 		t.Fail()
 	}
-
 }
 
 func TestExecutorLaunch(t *testing.T) {
@@ -428,13 +482,10 @@ func TestExecutorExecute(t *testing.T) {
 		<-s.completed
 		ec <- s.GetExitCode()
 	}()
+	s.SetUUID("blippy")
+	s.Prepare("echo $FOO", map[string]string{"FOO": "BAR"})
 	e.Execute(s)
 	e.Registry.Register("blippy", s)
-	s.UUID = "blippy"
-	s.command <- "echo $FOO"
-	s.environment <- map[string]string{"FOO": "BAR"}
-	s.begin <- 1
-	<-s.began
 	exit := <-ec
 	fmt.Println(exit)
 	if exit != 0 {

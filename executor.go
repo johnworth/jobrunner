@@ -270,7 +270,7 @@ func (j *Job) Quit() {
 
 // MonitorState fires off two goroutines: one that waits for a message on the
 // Kill, Completed, or abort channels, and another one that calls Wait() on
-// the command that's running and.
+// the command that's running. Do not call this method before Start().
 func (j *Job) MonitorState() {
 	go func() {
 		uuid := j.GetUUID()
@@ -334,11 +334,11 @@ func (j *Job) Wait() {
 	}
 }
 
-// Start gets the job running.
+// Start gets the job running. The job will not begin until a command is set,
+// the environment is set, and the begin channel receives a message. The best
+// way to do all that is with the Prepare() method.
 func (j *Job) Start() {
 	shouldStart := false
-	running := false
-
 	var cmdString string
 	var environment map[string]string
 	var cmd *exec.Cmd
@@ -350,7 +350,7 @@ func (j *Job) Start() {
 			shouldStart = true
 		}
 
-		if cmdString != "" && environment != nil && shouldStart && !running {
+		if cmdString != "" && environment != nil && shouldStart {
 			break
 		}
 	}
@@ -370,6 +370,8 @@ func (j *Job) Start() {
 }
 
 // Prepare allows the caller to set the command and environment for the job.
+// Call this before or after Start(). It doesn't matter when, but it must be
+// called.
 func (j *Job) Prepare(command string, environment map[string]string) {
 	go func() {
 		j.command <- command
