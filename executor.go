@@ -17,10 +17,8 @@ func exitCode(cmd *exec.Cmd) int {
 	return cmd.ProcessState.Sys().(syscall.WaitStatus).ExitStatus()
 }
 
-// OutputListener is the message struct for the Setter and Remove channels
-// in a OutputRegistry instance. The Listener is the channel that job outputs
-// are sent out on. The Latch channel is used for synchronizing the
-// AddListener() and RemoveListener() calls.
+// OutputListener maintains a Listener and Quit channel for data read from
+// a job's stdout/stderr stream.
 type OutputListener struct {
 	Listener   chan []byte
 	Quit       chan int
@@ -83,8 +81,8 @@ func (r *OutputReader) run() {
 	}
 }
 
-// Reader will do a consuming read from the OutputReader's buffer. This makes
-// it implement the Reader interface.
+// Reader will do a consuming read from the OutputReader's buffer. This method
+// allows an OutputReader to be substituted for an io.Reader.
 func (r *OutputReader) Read(p []byte) (n int, err error) {
 	r.m.Lock()
 	defer r.m.Unlock()
@@ -120,8 +118,8 @@ func (r *OutputReader) Quit() {
 	r.quitChannel <- 1
 }
 
-// Job contains channels that can be used to communicate with a job
-// goroutine. It also contains a pointer to a OutputRegistry.
+// Job contains all of the state associated with a job. You'll primarily
+// interact with a job through methods associated with Job.
 type Job struct {
 	cmds           chan jobCmd
 	command        chan string
@@ -154,7 +152,7 @@ type jobCmd struct {
 	action jobAction
 }
 
-// NewJob creates a new instance of Job and returns a pointer to it.
+// NewJob returns a pointer to a new instance of Job.
 func NewJob() *Job {
 	j := &Job{
 		cmds:           make(chan jobCmd),
@@ -232,7 +230,7 @@ func (j *Job) SetCmdPtr(p *exec.Cmd) {
 
 // GetCmdPtr gets the pointer to an exec.Cmd instance that's associated with
 // the Job. Should be threadsafe, but don't don't mutate any state on the
-// pointer or bad things could happen.
+// returned pointer or bad things could happen.
 func (j *Job) GetCmdPtr() *exec.Cmd {
 	var retval *exec.Cmd
 	j.cmdPtrLock.Lock()
@@ -257,13 +255,14 @@ func (j *Job) GetUUID() string {
 	return retval
 }
 
-// Write sends the []byte array passed out on RoutineWriter's OutChannel
+// Write sends the []byte array passed out on RoutineWriter's OutChannel. This
+// should allow a Job instance to replace an io.Writer.
 func (j *Job) Write(p []byte) (n int, err error) {
 	j.OutputRegistry.Input <- p
 	return len(p), nil
 }
 
-// Quit tells the Job to clean up its OutputRegistry
+// Quit tells the Job to clean up after itself.
 func (j *Job) Quit() {
 	j.cmds <- jobCmd{action: jobQuit}
 }
@@ -381,7 +380,7 @@ func (j *Job) Prepare(command string, environment map[string]string) {
 	}()
 }
 
-// Kill allows the caller to kill the job.
+// Kill kills a job.
 func (j *Job) Kill() {
 	j.kill <- 1
 }
@@ -394,8 +393,7 @@ type Executor struct {
 	Registry Registry
 }
 
-// NewExecutor creates a new instance of Executor and returns a pointer to
-// it.
+// NewExecutor returns a pointer to a newly created Executor.
 func NewExecutor() *Executor {
 	e := &Executor{
 		Registry: NewRegistry(),
@@ -403,7 +401,7 @@ func NewExecutor() *Executor {
 	return e
 }
 
-// Launch fires off a new job, adding its Job instance to the job registry.
+// Launch fires off a new job, adding a Job instance to the job registry.
 func (e *Executor) Launch(command string, environment map[string]string) string {
 	job := NewJob()
 	jobID := uuid.New()
@@ -415,8 +413,8 @@ func (e *Executor) Launch(command string, environment map[string]string) string 
 	return jobID
 }
 
-// Execute starts up a goroutine that communicates via a Job and will
-// eventually execute a job.
+// Execute fires off a goroutine that calls a jobs Start(), MonitorState(), and
+// Wait() methods. Execute itself does not block.
 func (e *Executor) Execute(j *Job) {
 	log.Printf("Executing job %s.", j.UUID)
 	go func() {

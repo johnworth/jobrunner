@@ -1,6 +1,5 @@
 package main
 
-// RegistryCmd represents a command sent to the registry
 type registryCommand struct {
 	action registryAction
 	key    string
@@ -20,14 +19,10 @@ const (
 	listkeys
 )
 
-// Registry encapsulates a map associating a string with a *Job. This
-// will let additional goroutines communicate with the goroutine running the
-// job associated with the key. The key will most likely be a UUID. There should
-// only be one instance on Registry per jobrunner instance.
+// Registry maintains a map of UUIDs associated with Job instances.
 type Registry chan registryCommand
 
-// NewRegistry creates a new instance of Registry and returns a pointer to
-// it. Does not make sure that only one instance is created.
+// NewRegistry returns a new instance of Registry.
 func NewRegistry() Registry {
 	r := make(Registry)
 	go r.run()
@@ -39,8 +34,8 @@ type registryFindResult struct {
 	result *Job
 }
 
-// Listen launches a goroutine that can be communicated with via the setter
-// and getter channels passed in. Listen is non-blocking.
+// run launches a goroutine that can be communicated with by the Registry
+// channel.
 func (r Registry) run() {
 	reg := make(map[string]*Job)
 	for command := range r {
@@ -66,13 +61,12 @@ func (r Registry) run() {
 	}
 }
 
-// Register adds the *Job to the registry with the key set to the
-// value of uuid.
+// Register associates 'uuid' with a *Job in the registry.
 func (r Registry) Register(uuid string, s *Job) {
 	r <- registryCommand{action: set, key: uuid, value: s}
 }
 
-// Get looks up the job for the given uuid in the registry.
+// Get returns the *Job for the given uuid in the registry.
 func (r Registry) Get(uuid string) *Job {
 	reply := make(chan interface{})
 	regCmd := registryCommand{action: get, key: uuid, result: reply}
@@ -81,7 +75,7 @@ func (r Registry) Get(uuid string) *Job {
 	return result.result
 }
 
-// HasKey returns true if a job associated with uuid is running, false otherwise.
+// HasKey returns true if a job associated with uuid in the registry.
 func (r Registry) HasKey(uuid string) bool {
 	reply := make(chan interface{})
 	regCmd := registryCommand{action: get, key: uuid, result: reply}
@@ -90,7 +84,7 @@ func (r Registry) HasKey(uuid string) bool {
 	return result.found
 }
 
-// List returns the list of jobs from the registry.
+// List returns the list of jobs in the registry.
 func (r Registry) List() []string {
 	reply := make(chan interface{})
 	regCmd := registryCommand{action: listkeys, result: reply}
@@ -144,8 +138,6 @@ func NewOutputRegistry() *outputRegistry {
 	return l
 }
 
-// Listen fires off a goroutine that can be communicated with through the Input,
-// Setter, and Remove channels.
 func (o *outputRegistry) run() {
 	registry := make(map[*OutputListener]chan []byte)
 	for {
@@ -175,17 +167,15 @@ func (o *outputRegistry) run() {
 }
 
 // AddListener creates a OutputListener, adds it to the OutputRegistry,
-// and returns a pointer to the OutputListener. Synchronizes with the
-// OutputRegistry goroutine through the OutputListener's Latch channel.
+// and returns a pointer to it.
 func (o *outputRegistry) AddListener() *OutputListener {
 	adder := NewOutputListener()
 	o.commands <- outputRegistryCmd{key: adder, value: adder.Listener, action: registrySet}
 	return adder
 }
 
-// RemoveListener removes the passed in OutputListener from the
-// OutputRegistry. Synchronizes with the JobOuputRegistry goroutine through
-// the OutputListener's Latch channel. Does not close any channels.
+// RemoveListener removes the passed in *OutputListener from the
+// OutputRegistry.
 func (o *outputRegistry) RemoveListener(l *OutputListener) {
 	reply := make(chan interface{})
 	cmd := outputRegistryCmd{key: l, action: registryRemove, result: reply}
@@ -193,6 +183,7 @@ func (o *outputRegistry) RemoveListener(l *OutputListener) {
 	<-reply
 }
 
+// HasKey returns true if the *OutputListener is in the registry.
 func (o *outputRegistry) HasKey(l *OutputListener) bool {
 	reply := make(chan interface{})
 	cmd := outputRegistryCmd{key: l, action: registryFind, result: reply}
