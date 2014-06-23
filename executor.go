@@ -120,112 +120,10 @@ func (r *OutputReader) Quit() {
 	r.quitChannel <- 1
 }
 
-// outputRegistry contains a list of channels that accept []byte's. Each job
-// gets its own OutputRegistry. The OutputRegistry is referred to inside
-// the job's Syncer instance, which in turn is referred to within the the
-// Registry.
-type outputRegistry struct {
-	commands chan outputRegistryCmd
-	Input    chan []byte
-}
-
-type outputRegistryAction int
-
-const (
-	registrySet outputRegistryAction = iota
-	registryRemove
-	registryFind
-	registryQuit
-)
-
-type outputRegistryCmd struct {
-	action outputRegistryAction
-	key    *OutputListener
-	value  chan []byte
-	result chan interface{}
-}
-
-type outputRegistryFindResult struct {
-	found bool
-	value chan []byte
-}
-
-// NewOutputRegistry returns a pointer to a new instance of OutputRegistry.
-func NewOutputRegistry() *outputRegistry {
-	l := &outputRegistry{
-		commands: make(chan outputRegistryCmd),
-		Input:    make(chan []byte),
-	}
-	go l.run()
-	return l
-}
-
-// Listen fires off a goroutine that can be communicated with through the Input,
-// Setter, and Remove channels.
-func (o *outputRegistry) run() {
-	registry := make(map[*OutputListener]chan []byte)
-	for {
-		select {
-		case command := <-o.commands:
-			switch command.action {
-			case registrySet:
-				registry[command.key] = command.value
-			case registryRemove:
-				delete(registry, command.key)
-				command.result <- 1
-			case registryFind:
-				val, ok := registry[command.key]
-				command.result <- outputRegistryFindResult{found: ok, value: val}
-			case registryQuit:
-				for l := range registry {
-					l.Quit <- 1
-				}
-				close(o.commands)
-			}
-		case buf := <-o.Input: //Demuxing the output to the listeners
-			for _, ch := range registry {
-				ch <- buf
-			}
-		}
-	}
-}
-
-// AddListener creates a OutputListener, adds it to the OutputRegistry,
-// and returns a pointer to the OutputListener. Synchronizes with the
-// OutputRegistry goroutine through the OutputListener's Latch channel.
-func (o *outputRegistry) AddListener() *OutputListener {
-	adder := NewOutputListener()
-	o.commands <- outputRegistryCmd{key: adder, value: adder.Listener, action: registrySet}
-	return adder
-}
-
-// RemoveListener removes the passed in OutputListener from the
-// OutputRegistry. Synchronizes with the JobOuputRegistry goroutine through
-// the OutputListener's Latch channel. Does not close any channels.
-func (o *outputRegistry) RemoveListener(l *OutputListener) {
-	reply := make(chan interface{})
-	cmd := outputRegistryCmd{key: l, action: registryRemove, result: reply}
-	o.commands <- cmd
-	<-reply
-}
-
-func (o *outputRegistry) HasKey(l *OutputListener) bool {
-	reply := make(chan interface{})
-	cmd := outputRegistryCmd{key: l, action: registryFind, result: reply}
-	o.commands <- cmd
-	result := (<-reply).(outputRegistryFindResult)
-	return result.found
-}
-
-// Quit tells the OutputRegistry's goroutine to exit.
-func (o *outputRegistry) Quit() {
-	o.commands <- outputRegistryCmd{action: registryQuit}
-}
-
-// Syncer contains channels that can be used to communicate with a job
+// Job contains channels that can be used to communicate with a job
 // goroutine. It also contains a pointer to a OutputRegistry.
-type Syncer struct {
-	cmds           chan syncerCmd
+type Job struct {
+	cmds           chan jobCmd
 	Command        chan string
 	Environment    chan map[string]string
 	Start          chan int
@@ -244,20 +142,20 @@ type Syncer struct {
 	uuidLock       *sync.Mutex
 }
 
-type syncerAction int
+type jobAction int
 
 const (
-	syncerQuit syncerAction = iota
+	jobQuit jobAction = iota
 )
 
-type syncerCmd struct {
-	action syncerAction
+type jobCmd struct {
+	action jobAction
 }
 
-// NewSyncer creates a new instance of Syncer and returns a pointer to it.
-func NewSyncer() *Syncer {
-	s := &Syncer{
-		cmds:           make(chan syncerCmd),
+// NewJob creates a new instance of Job and returns a pointer to it.
+func NewJob() *Job {
+	s := &Job{
+		cmds:           make(chan jobCmd),
 		Command:        make(chan string),
 		Environment:    make(chan map[string]string),
 		Start:          make(chan int),
@@ -279,195 +177,122 @@ func NewSyncer() *Syncer {
 	return s
 }
 
-func (s *Syncer) run() {
+func (j *Job) run() {
 	select {
-	case <-s.cmds:
-		s.OutputRegistry.Quit()
-		close(s.cmds)
+	case <-j.cmds:
+		j.OutputRegistry.Quit()
+		close(j.cmds)
 
 	}
 }
 
-// SetKilled sets the killed field for a Syncer. Should be threadsafe.
-func (s *Syncer) SetKilled(k bool) {
-	s.killedLock.Lock()
-	s.killed = k
-	s.killedLock.Unlock()
+// SetKilled sets the killed field for a Job. Should be threadsafe.
+func (j *Job) SetKilled(k bool) {
+	j.killedLock.Lock()
+	j.killed = k
+	j.killedLock.Unlock()
 }
 
-// GetKilled gets the killed field for a Syncer. Should be threadsafe.
-func (s *Syncer) GetKilled() bool {
+// GetKilled gets the killed field for a Job. Should be threadsafe.
+func (j *Job) GetKilled() bool {
 	var retval bool
-	s.killedLock.Lock()
-	retval = s.killed
-	s.killedLock.Unlock()
+	j.killedLock.Lock()
+	retval = j.killed
+	j.killedLock.Unlock()
 	return retval
 }
 
-// SetExitCode sets the exitCode field for a Syncer. Should be threadsafe.
-func (s *Syncer) SetExitCode(e int) {
-	s.exitCodeLock.Lock()
-	s.exitCode = e
-	s.exitCodeLock.Unlock()
+// SetExitCode sets the exitCode field for a Job. Should be threadsafe.
+func (j *Job) SetExitCode(e int) {
+	j.exitCodeLock.Lock()
+	j.exitCode = e
+	j.exitCodeLock.Unlock()
 }
 
-// GetExitCode gets the exitCode from a Syncer. Should be threadsafe.
-func (s *Syncer) GetExitCode() int {
+// GetExitCode gets the exitCode from a Job. Should be threadsafe.
+func (j *Job) GetExitCode() int {
 	var retval int
-	s.exitCodeLock.Lock()
-	retval = s.exitCode
-	s.exitCodeLock.Unlock()
+	j.exitCodeLock.Lock()
+	retval = j.exitCode
+	j.exitCodeLock.Unlock()
 	return retval
 }
 
-// SetCmdPtr sets the pointer to an exec.Cmd instance for the Syncer. Should
+// SetCmdPtr sets the pointer to an exec.Cmd instance for the Job. Should
 // be threadsafe.
-func (s *Syncer) SetCmdPtr(p *exec.Cmd) {
-	s.cmdPtrLock.Lock()
-	s.cmdPtr = p
-	s.cmdPtrLock.Unlock()
+func (j *Job) SetCmdPtr(p *exec.Cmd) {
+	j.cmdPtrLock.Lock()
+	j.cmdPtr = p
+	j.cmdPtrLock.Unlock()
 }
 
 // GetCmdPtr gets the pointer to an exec.Cmd instance that's associated with
-// the Syncer. Should be threadsafe, but don't don't mutate any state on the
+// the Job. Should be threadsafe, but don't don't mutate any state on the
 // pointer or bad things could happen.
-func (s *Syncer) GetCmdPtr() *exec.Cmd {
+func (j *Job) GetCmdPtr() *exec.Cmd {
 	var retval *exec.Cmd
-	s.cmdPtrLock.Lock()
-	retval = s.cmdPtr
-	s.cmdPtrLock.Unlock()
+	j.cmdPtrLock.Lock()
+	retval = j.cmdPtr
+	j.cmdPtrLock.Unlock()
 	return retval
 }
 
-// SetUUID sets the UUID for a Syncer.
-func (s *Syncer) SetUUID(uuid string) {
-	s.uuidLock.Lock()
-	s.UUID = uuid
-	s.uuidLock.Unlock()
+// SetUUID sets the UUID for a Job.
+func (j *Job) SetUUID(uuid string) {
+	j.uuidLock.Lock()
+	j.UUID = uuid
+	j.uuidLock.Unlock()
 }
 
-// GetUUID gets the UUID for a Syncer.
-func (s *Syncer) GetUUID() string {
+// GetUUID gets the UUID for a Job.
+func (j *Job) GetUUID() string {
 	var retval string
-	s.uuidLock.Lock()
-	retval = s.UUID
-	s.uuidLock.Unlock()
+	j.uuidLock.Lock()
+	retval = j.UUID
+	j.uuidLock.Unlock()
 	return retval
 }
 
 // Write sends the []byte array passed out on RoutineWriter's OutChannel
-func (s *Syncer) Write(p []byte) (n int, err error) {
-	s.OutputRegistry.Input <- p
+func (j *Job) Write(p []byte) (n int, err error) {
+	j.OutputRegistry.Input <- p
 	return len(p), nil
 }
 
-// Quit tells the Syncer to clean up its OutputRegistry
-func (s *Syncer) Quit() {
-	s.cmds <- syncerCmd{action: syncerQuit}
+// Quit tells the Job to clean up its OutputRegistry
+func (j *Job) Quit() {
+	j.cmds <- jobCmd{action: jobQuit}
 }
 
-// RegistryCmd represents a command sent to the registry
-type registryCommand struct {
-	action registryAction
-	key    string
-	value  interface{}
-	result chan<- interface{}
-}
-
-type registryAction int
-
-const (
-	remove registryAction = iota
-	find
-	set
-	get
-	length
-	quit
-	listkeys
-)
-
-// Registry encapsulates a map associating a string with a *Syncer. This
-// will let additional goroutines communicate with the goroutine running the
-// job associated with the key. The key will most likely be a UUID. There should
-// only be one instance on Registry per jobrunner instance.
-type Registry chan registryCommand
-
-// NewRegistry creates a new instance of Registry and returns a pointer to
-// it. Does not make sure that only one instance is created.
-func NewRegistry() Registry {
-	r := make(Registry)
-	go r.run()
-	return r
-}
-
-type registryFindResult struct {
-	found  bool
-	result *Syncer
-}
-
-// Listen launches a goroutine that can be communicated with via the setter
-// and getter channels passed in. Listen is non-blocking.
-func (r Registry) run() {
-	reg := make(map[string]*Syncer)
-	for command := range r {
-		switch command.action {
-		case set:
-			reg[command.key] = command.value.(*Syncer)
-		case get:
-			val, found := reg[command.key]
-			command.result <- registryFindResult{found, val}
-		case length:
-			command.result <- len(reg)
-		case remove:
-			delete(reg, command.key)
-		case listkeys:
-			var retval []string
-			for k := range reg {
-				retval = append(retval, k)
+func (j *Job) monitorJobState(done chan<- error, abort <-chan int) {
+	go func() {
+		uuid := j.GetUUID()
+		for {
+			select {
+			case <-j.Kill:
+				j.SetKilled(true)
+				cmdptr := j.GetCmdPtr()
+				if cmdptr != nil {
+					cmdptr.Process.Kill()
+				}
+				log.Printf("Kill signal was sent to job %s.", uuid)
+			case <-j.Completed:
+				log.Printf("Job %s completed.", uuid)
+				return
+			case <-abort:
+				log.Printf("Abort was sent for job %s.", uuid)
+				return
 			}
-			command.result <- retval
-		case quit:
-			close(r)
 		}
-	}
-}
-
-// Register adds the *Syncer to the registry with the key set to the
-// value of uuid.
-func (r Registry) Register(uuid string, s *Syncer) {
-	r <- registryCommand{action: set, key: uuid, value: s}
-}
-
-// Get looks up the job for the given uuid in the registry.
-func (r Registry) Get(uuid string) *Syncer {
-	reply := make(chan interface{})
-	regCmd := registryCommand{action: get, key: uuid, result: reply}
-	r <- regCmd
-	result := (<-reply).(registryFindResult)
-	return result.result
-}
-
-// HasKey returns true if a job associated with uuid is running, false otherwise.
-func (r Registry) HasKey(uuid string) bool {
-	reply := make(chan interface{})
-	regCmd := registryCommand{action: get, key: uuid, result: reply}
-	r <- regCmd
-	result := (<-reply).(registryFindResult)
-	return result.found
-}
-
-// List returns the list of jobs from the registry.
-func (r Registry) List() []string {
-	reply := make(chan interface{})
-	regCmd := registryCommand{action: listkeys, result: reply}
-	r <- regCmd
-	result := (<-reply).([]string)
-	return result
-}
-
-// Delete deletes a *Syncer from the registry.
-func (r Registry) Delete(uuid string) {
-	r <- registryCommand{action: remove, key: uuid}
+	}()
+	go func() {
+		cmdptr := j.GetCmdPtr()
+		uuid := j.GetUUID()
+		select {
+		case done <- cmdptr.Wait():
+			log.Printf("Job %s is no longer in the Wait state.", uuid)
+		}
+	}()
 }
 
 // Executor maintains a reference to a Registry and is able to launch
@@ -487,55 +312,24 @@ func NewExecutor() *Executor {
 	return e
 }
 
-// Launch fires off a new job, adding its Syncer instance to the job registry.
-func (j *Executor) Launch(command string, environment map[string]string) string {
-	syncer := NewSyncer()
+// Launch fires off a new job, adding its Job instance to the job registry.
+func (e *Executor) Launch(command string, environment map[string]string) string {
+	job := NewJob()
 	jobID := uuid.New()
-	syncer.UUID = jobID
-	j.Registry.Register(jobID, syncer)
+	job.UUID = jobID
+	e.Registry.Register(jobID, job)
 	log.Printf("Registering job %s.", jobID)
-	j.Execute(syncer)
-	syncer.Command <- command
-	syncer.Environment <- environment
-	syncer.Start <- 1
-	<-syncer.Started
+	e.Execute(job)
+	job.Command <- command
+	job.Environment <- environment
+	job.Start <- 1
+	<-job.Started
 	return jobID
 }
 
-func monitorJobState(s *Syncer, done chan<- error, abort <-chan int) {
-	go func() {
-		uuid := s.GetUUID()
-		for {
-			select {
-			case <-s.Kill:
-				s.SetKilled(true)
-				cmdptr := s.GetCmdPtr()
-				if cmdptr != nil {
-					cmdptr.Process.Kill()
-				}
-				log.Printf("Kill signal was sent to job %s.", uuid)
-			case <-s.Completed:
-				log.Printf("Job %s completed.", uuid)
-				return
-			case <-abort:
-				log.Printf("Abort was sent for job %s.", uuid)
-				return
-			}
-		}
-	}()
-	go func() {
-		cmdptr := s.GetCmdPtr()
-		uuid := s.GetUUID()
-		select {
-		case done <- cmdptr.Wait():
-			log.Printf("Job %s is no longer in the Wait state.", uuid)
-		}
-	}()
-}
-
-// Execute starts up a goroutine that communicates via a Syncer and will
+// Execute starts up a goroutine that communicates via a Job and will
 // eventually execute a job.
-func (j *Executor) Execute(s *Syncer) {
+func (e *Executor) Execute(s *Job) {
 	log.Printf("Executing job %s.", s.UUID)
 	go func() {
 		shouldStart := false
@@ -571,10 +365,10 @@ func (j *Executor) Execute(s *Syncer) {
 			return
 		}
 		log.Printf("Started job %s.", uuid)
-		monitorJobState(s, done, abort)
+		s.monitorJobState(done, abort)
 		go func() {
 			defer s.Quit()
-			defer j.Registry.Delete(uuid)
+			defer e.Registry.Delete(uuid)
 			select {
 			case err := <-done:
 				if s.GetKilled() { //Job killed
@@ -605,10 +399,10 @@ func (j *Executor) Execute(s *Syncer) {
 }
 
 // Kill terminates the specified job with extreme prejudice.
-func (j *Executor) Kill(uuid string) {
-	if j.Registry.HasKey(uuid) {
-		syncer := j.Registry.Get(uuid)
-		syncer.Kill <- 1
+func (e *Executor) Kill(uuid string) {
+	if e.Registry.HasKey(uuid) {
+		job := e.Registry.Get(uuid)
+		job.Kill <- 1
 	}
 }
 

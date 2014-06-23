@@ -248,8 +248,8 @@ func TestOutputRegistryInput2(t *testing.T) {
 
 }
 
-func TestSyncerWrite(t *testing.T) {
-	s := NewSyncer()
+func TestJobWrite(t *testing.T) {
+	s := NewJob()
 	r := s.OutputRegistry
 	l1 := r.AddListener()
 	l2 := r.AddListener()
@@ -280,17 +280,17 @@ func TestSyncerWrite(t *testing.T) {
 
 func TestRegistryRegister(t *testing.T) {
 	r := NewRegistry()
-	s := NewSyncer()
+	s := NewJob()
 	r.Register("testing", s)
-	foundsyncer := r.HasKey("testing")
-	if !foundsyncer {
+	foundjob := r.HasKey("testing")
+	if !foundjob {
 		t.Fail()
 	}
 }
 
 func TestRegistryGet(t *testing.T) {
 	r := NewRegistry()
-	s := NewSyncer()
+	s := NewJob()
 	r.Register("testing", s)
 	get := r.Get("testing")
 	if get != s {
@@ -300,7 +300,7 @@ func TestRegistryGet(t *testing.T) {
 
 func TestRegistryHasKey(t *testing.T) {
 	r := NewRegistry()
-	s := NewSyncer()
+	s := NewJob()
 	r.Register("testing", s)
 	if !r.HasKey("testing") {
 		t.Fail()
@@ -312,7 +312,7 @@ func TestRegistryHasKey(t *testing.T) {
 
 func TestRegistryDelete(t *testing.T) {
 	r := NewRegistry()
-	s := NewSyncer()
+	s := NewJob()
 	r.Register("testing", s)
 	r.Delete("testing")
 	if r.HasKey("testing") {
@@ -322,7 +322,7 @@ func TestRegistryDelete(t *testing.T) {
 
 func TestRegistryList(t *testing.T) {
 	r := NewRegistry()
-	s := NewSyncer()
+	s := NewJob()
 	r.Register("testing", s)
 	r.Register("testing2", s)
 	r.Register("testing3", s)
@@ -358,7 +358,7 @@ func TestExecutorLaunch(t *testing.T) {
 
 func TestExecutorExecute(t *testing.T) {
 	e := NewExecutor()
-	s := NewSyncer()
+	s := NewJob()
 	ec := make(chan int)
 	go func() {
 		<-s.Completed
@@ -393,7 +393,7 @@ func TestExecutorKill(t *testing.T) {
 		t.Errorf("Exit code for the kill command wasn't -100.")
 	}
 	if !s.GetKilled() {
-		t.Errorf("The Syncer.Killed field wasn't false.")
+		t.Errorf("The Job.Killed field wasn't false.")
 	}
 	if e.Registry.HasKey(jobid) {
 		t.Error("The registry still has a reference to the jobID")
