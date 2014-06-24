@@ -20,17 +20,15 @@ func exitCode(cmd *exec.Cmd) int {
 // OutputListener maintains a Listener and Quit channel for data read from
 // a job's stdout/stderr stream.
 type OutputListener struct {
-	Listener   chan []byte
-	Quit       chan int
-	readBuffer []byte
+	Listener chan []byte
+	Quit     chan int
 }
 
 // NewOutputListener returns a new instance of OutputListener.
 func NewOutputListener() *OutputListener {
 	return &OutputListener{
-		Listener:   make(chan []byte),
-		Quit:       make(chan int),
-		readBuffer: make([]byte, 0),
+		Listener: make(chan []byte),
+		Quit:     make(chan int),
 	}
 }
 
