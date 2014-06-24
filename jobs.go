@@ -85,8 +85,8 @@ func (j *Job) SetUUID(u string) {
 	j.uuid = u
 }
 
-// BashCommand contains all of the state associated with a job. You'll primarily
-// interact with a job through methods associated with Job.
+// BashCommand contains all of the state associated with a command run through
+// bash.
 type BashCommand struct {
 	cmds           chan bashCommandCmd
 	command        chan string
@@ -119,7 +119,7 @@ type bashCommandCmd struct {
 	action bashCommandAction
 }
 
-// NewBashCommand returns a pointer to a new instance of Job.
+// NewBashCommand returns a pointer to a new instance of BashCommand.
 func NewBashCommand() *BashCommand {
 	j := &BashCommand{
 		cmds:           make(chan bashCommandCmd),
@@ -155,14 +155,14 @@ func (j *BashCommand) run() {
 	}
 }
 
-// SetKilled sets the killed field for a Job. Should be threadsafe.
+// SetKilled sets the killed field for a BashCommand. Should be threadsafe.
 func (j *BashCommand) SetKilled(k bool) {
 	j.killedLock.Lock()
 	j.killed = k
 	j.killedLock.Unlock()
 }
 
-// Killed gets the killed field for a Job. Should be threadsafe.
+// Killed gets the killed field for a BashCommand. Should be threadsafe.
 func (j *BashCommand) Killed() bool {
 	var retval bool
 	j.killedLock.Lock()
@@ -171,14 +171,14 @@ func (j *BashCommand) Killed() bool {
 	return retval
 }
 
-// SetExitCode sets the exitCode field for a Job. Should be threadsafe.
+// SetExitCode sets the exitCode field for a BashCommand. Should be threadsafe.
 func (j *BashCommand) SetExitCode(e int) {
 	j.exitCodeLock.Lock()
 	j.exitCode = e
 	j.exitCodeLock.Unlock()
 }
 
-// ExitCode gets the exitCode from a Job. Should be threadsafe.
+// ExitCode gets the exitCode from a BashCommand. Should be threadsafe.
 func (j *BashCommand) ExitCode() int {
 	var retval int
 	j.exitCodeLock.Lock()
@@ -187,8 +187,8 @@ func (j *BashCommand) ExitCode() int {
 	return retval
 }
 
-// SetCmdPtr sets the pointer to an exec.Cmd instance for the Job. Should
-// be threadsafe.
+// SetCmdPtr sets the pointer to an exec.Cmd instance for the BashCommand.
+// Should be threadsafe.
 func (j *BashCommand) SetCmdPtr(p *exec.Cmd) {
 	j.cmdPtrLock.Lock()
 	j.cmdPtr = p
@@ -196,8 +196,8 @@ func (j *BashCommand) SetCmdPtr(p *exec.Cmd) {
 }
 
 // CmdPtr gets the pointer to an exec.Cmd instance that's associated with
-// the Job. Should be threadsafe, but don't don't mutate any state on the
-// returned pointer or bad things could happen.
+// the BashCommand. Should be threadsafe, but don't don't mutate any state on
+// the returned pointer or bad things could happen.
 func (j *BashCommand) CmdPtr() *exec.Cmd {
 	var retval *exec.Cmd
 	j.cmdPtrLock.Lock()
@@ -206,14 +206,14 @@ func (j *BashCommand) CmdPtr() *exec.Cmd {
 	return retval
 }
 
-// SetUUID sets the UUID for a Job.
+// SetUUID sets the UUID for a BashCommand.
 func (j *BashCommand) SetUUID(uuid string) {
 	j.uuidLock.Lock()
 	j.uuid = uuid
 	j.uuidLock.Unlock()
 }
 
-// UUID gets the UUID for a Job.
+// UUID gets the UUID for a BashCommand.
 func (j *BashCommand) UUID() string {
 	var retval string
 	j.uuidLock.Lock()
@@ -223,13 +223,13 @@ func (j *BashCommand) UUID() string {
 }
 
 // Write sends the []byte array passed out on RoutineWriter's OutChannel. This
-// should allow a Job instance to replace an io.Writer.
+// should allow a BashCommand instance to replace an io.Writer.
 func (j *BashCommand) Write(p []byte) (n int, err error) {
 	j.OutputRegistry.Input <- p
 	return len(p), nil
 }
 
-// Quit tells the Job to clean up after itself.
+// Quit tells the BashCommand to clean up after itself.
 func (j *BashCommand) Quit() {
 	j.cmds <- bashCommandCmd{action: bashCommandQuit}
 }
@@ -268,26 +268,26 @@ func (j *BashCommand) MonitorState() {
 	}()
 }
 
-// Wait blocks until the running job is completed.
+// Wait blocks until the running command is completed.
 func (j *BashCommand) Wait() {
 	defer j.Quit()
 	uuid := j.UUID()
 	cmd := j.CmdPtr()
 	select {
 	case err := <-j.done:
-		if j.Killed() { //Job killed
+		if j.Killed() { //Command killed
 			j.SetExitCode(-100)
 			j.completed <- 1
 			return
 		}
-		if err == nil && j.ExitCode() == -9000 { //Job exited normally
+		if err == nil && j.ExitCode() == -9000 { //Command exited normally
 			if cmd.ProcessState != nil {
 				j.SetExitCode(exitCode(cmd))
 			} else {
 				j.SetExitCode(0)
 			}
 		}
-		if err != nil { //job exited badly, but wasn't killed
+		if err != nil { //Command exited badly, but wasn't killed
 			if cmd.ProcessState != nil {
 				j.SetExitCode(exitCode(cmd))
 			} else {
@@ -300,7 +300,7 @@ func (j *BashCommand) Wait() {
 	}
 }
 
-// Start gets the job running. The job will not begin until a command is set,
+// Start gets the command running. The job will not begin until a command is set,
 // the environment is set, and the begin channel receives a message. The best
 // way to do all that is with the Prepare() method.
 func (j *BashCommand) Start() {
@@ -347,7 +347,7 @@ func (j *BashCommand) Prepare(command string, environment map[string]string) {
 	}()
 }
 
-// Kill kills a job.
+// Kill kills a command.
 func (j *BashCommand) Kill() {
 	j.kill <- 1
 }
