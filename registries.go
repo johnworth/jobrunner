@@ -31,17 +31,17 @@ func NewRegistry() Registry {
 
 type registryFindResult struct {
 	found  bool
-	result *Job
+	result *BashJob
 }
 
 // run launches a goroutine that can be communicated with by the Registry
 // channel.
 func (r Registry) run() {
-	reg := make(map[string]*Job)
+	reg := make(map[string]*BashJob)
 	for command := range r {
 		switch command.action {
 		case set:
-			reg[command.key] = command.value.(*Job)
+			reg[command.key] = command.value.(*BashJob)
 		case get:
 			val, found := reg[command.key]
 			command.result <- registryFindResult{found, val}
@@ -62,12 +62,12 @@ func (r Registry) run() {
 }
 
 // Register associates 'uuid' with a *Job in the registry.
-func (r Registry) Register(uuid string, s *Job) {
+func (r Registry) Register(uuid string, s *BashJob) {
 	r <- registryCommand{action: set, key: uuid, value: s}
 }
 
 // Get returns the *Job for the given uuid in the registry.
-func (r Registry) Get(uuid string) *Job {
+func (r Registry) Get(uuid string) *BashJob {
 	reply := make(chan interface{})
 	regCmd := registryCommand{action: get, key: uuid, result: reply}
 	r <- regCmd

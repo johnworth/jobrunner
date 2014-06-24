@@ -116,10 +116,10 @@ func (r *OutputReader) Quit() {
 	r.quitChannel <- 1
 }
 
-// Job contains all of the state associated with a job. You'll primarily
+// BashJob contains all of the state associated with a job. You'll primarily
 // interact with a job through methods associated with Job.
-type Job struct {
-	cmds           chan jobCmd
+type BashJob struct {
+	cmds           chan bashJobCmd
 	command        chan string
 	done           chan error
 	abort          chan int
@@ -140,20 +140,20 @@ type Job struct {
 	uuidLock       *sync.Mutex
 }
 
-type jobAction int
+type bashJobAction int
 
 const (
-	jobQuit jobAction = iota
+	bashJobQuit bashJobAction = iota
 )
 
-type jobCmd struct {
-	action jobAction
+type bashJobCmd struct {
+	action bashJobAction
 }
 
-// NewJob returns a pointer to a new instance of Job.
-func NewJob() *Job {
-	j := &Job{
-		cmds:           make(chan jobCmd),
+// NewBashJob returns a pointer to a new instance of Job.
+func NewBashJob() *BashJob {
+	j := &BashJob{
+		cmds:           make(chan bashJobCmd),
 		command:        make(chan string),
 		done:           make(chan error),
 		abort:          make(chan int),
@@ -177,7 +177,7 @@ func NewJob() *Job {
 	return j
 }
 
-func (j *Job) run() {
+func (j *BashJob) run() {
 	select {
 	case <-j.cmds:
 		j.OutputRegistry.Quit()
@@ -187,14 +187,14 @@ func (j *Job) run() {
 }
 
 // SetKilled sets the killed field for a Job. Should be threadsafe.
-func (j *Job) SetKilled(k bool) {
+func (j *BashJob) SetKilled(k bool) {
 	j.killedLock.Lock()
 	j.killed = k
 	j.killedLock.Unlock()
 }
 
 // Killed gets the killed field for a Job. Should be threadsafe.
-func (j *Job) Killed() bool {
+func (j *BashJob) Killed() bool {
 	var retval bool
 	j.killedLock.Lock()
 	retval = j.killed
@@ -203,14 +203,14 @@ func (j *Job) Killed() bool {
 }
 
 // SetExitCode sets the exitCode field for a Job. Should be threadsafe.
-func (j *Job) SetExitCode(e int) {
+func (j *BashJob) SetExitCode(e int) {
 	j.exitCodeLock.Lock()
 	j.exitCode = e
 	j.exitCodeLock.Unlock()
 }
 
 // ExitCode gets the exitCode from a Job. Should be threadsafe.
-func (j *Job) ExitCode() int {
+func (j *BashJob) ExitCode() int {
 	var retval int
 	j.exitCodeLock.Lock()
 	retval = j.exitCode
@@ -220,7 +220,7 @@ func (j *Job) ExitCode() int {
 
 // SetCmdPtr sets the pointer to an exec.Cmd instance for the Job. Should
 // be threadsafe.
-func (j *Job) SetCmdPtr(p *exec.Cmd) {
+func (j *BashJob) SetCmdPtr(p *exec.Cmd) {
 	j.cmdPtrLock.Lock()
 	j.cmdPtr = p
 	j.cmdPtrLock.Unlock()
@@ -229,7 +229,7 @@ func (j *Job) SetCmdPtr(p *exec.Cmd) {
 // CmdPtr gets the pointer to an exec.Cmd instance that's associated with
 // the Job. Should be threadsafe, but don't don't mutate any state on the
 // returned pointer or bad things could happen.
-func (j *Job) CmdPtr() *exec.Cmd {
+func (j *BashJob) CmdPtr() *exec.Cmd {
 	var retval *exec.Cmd
 	j.cmdPtrLock.Lock()
 	retval = j.cmdPtr
@@ -238,14 +238,14 @@ func (j *Job) CmdPtr() *exec.Cmd {
 }
 
 // SetUUID sets the UUID for a Job.
-func (j *Job) SetUUID(uuid string) {
+func (j *BashJob) SetUUID(uuid string) {
 	j.uuidLock.Lock()
 	j.uuid = uuid
 	j.uuidLock.Unlock()
 }
 
 // UUID gets the UUID for a Job.
-func (j *Job) UUID() string {
+func (j *BashJob) UUID() string {
 	var retval string
 	j.uuidLock.Lock()
 	retval = j.uuid
@@ -255,20 +255,20 @@ func (j *Job) UUID() string {
 
 // Write sends the []byte array passed out on RoutineWriter's OutChannel. This
 // should allow a Job instance to replace an io.Writer.
-func (j *Job) Write(p []byte) (n int, err error) {
+func (j *BashJob) Write(p []byte) (n int, err error) {
 	j.OutputRegistry.Input <- p
 	return len(p), nil
 }
 
 // Quit tells the Job to clean up after itself.
-func (j *Job) Quit() {
-	j.cmds <- jobCmd{action: jobQuit}
+func (j *BashJob) Quit() {
+	j.cmds <- bashJobCmd{action: bashJobQuit}
 }
 
 // MonitorState fires off two goroutines: one that waits for a message on the
 // Kill, Completed, or abort channels, and another one that calls Wait() on
 // the command that's running. Do not call this method before Start().
-func (j *Job) MonitorState() {
+func (j *BashJob) MonitorState() {
 	go func() {
 		uuid := j.UUID()
 		for {
@@ -300,7 +300,7 @@ func (j *Job) MonitorState() {
 }
 
 // Wait blocks until the running job is completed.
-func (j *Job) Wait() {
+func (j *BashJob) Wait() {
 	defer j.Quit()
 	uuid := j.UUID()
 	cmd := j.CmdPtr()
@@ -334,7 +334,7 @@ func (j *Job) Wait() {
 // Start gets the job running. The job will not begin until a command is set,
 // the environment is set, and the begin channel receives a message. The best
 // way to do all that is with the Prepare() method.
-func (j *Job) Start() {
+func (j *BashJob) Start() {
 	shouldStart := false
 	var cmdString string
 	var environment map[string]string
@@ -369,7 +369,7 @@ func (j *Job) Start() {
 // Prepare allows the caller to set the command and environment for the job.
 // Call this before or after Start(). It doesn't matter when, but it must be
 // called.
-func (j *Job) Prepare(command string, environment map[string]string) {
+func (j *BashJob) Prepare(command string, environment map[string]string) {
 	go func() {
 		j.command <- command
 		j.environment <- environment
@@ -379,7 +379,7 @@ func (j *Job) Prepare(command string, environment map[string]string) {
 }
 
 // Kill kills a job.
-func (j *Job) Kill() {
+func (j *BashJob) Kill() {
 	j.kill <- 1
 }
 
@@ -401,7 +401,7 @@ func NewExecutor() *Executor {
 
 // Launch fires off a new job, adding a Job instance to the job registry.
 func (e *Executor) Launch(command string, environment map[string]string) string {
-	job := NewJob()
+	job := NewBashJob()
 	jobID := uuid.New()
 	job.SetUUID(jobID)
 	e.Registry.Register(jobID, job)
@@ -413,7 +413,7 @@ func (e *Executor) Launch(command string, environment map[string]string) string 
 
 // Execute fires off a goroutine that calls a jobs Start(), MonitorState(), and
 // Wait() methods. Execute itself does not block.
-func (e *Executor) Execute(j *Job) {
+func (e *Executor) Execute(j *BashJob) {
 	log.Printf("Executing job %s.", j.UUID())
 	go func() {
 		uuid := j.UUID()
