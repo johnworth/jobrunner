@@ -251,7 +251,7 @@ func TestOutputRegistryInput2(t *testing.T) {
 }
 
 func TestJobWrite(t *testing.T) {
-	s := NewBashJob()
+	s := NewBashCommand()
 	r := s.OutputRegistry
 	l1 := r.AddListener()
 	l2 := r.AddListener()
@@ -281,14 +281,14 @@ func TestJobWrite(t *testing.T) {
 }
 
 func TestJobKilled(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	if j.Killed() {
 		t.Fail()
 	}
 }
 
 func TestJobSetKilled(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	j.SetKilled(true)
 	if !j.Killed() {
 		t.Fail()
@@ -296,14 +296,14 @@ func TestJobSetKilled(t *testing.T) {
 }
 
 func TestGetExitCode(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	if j.ExitCode() != -9000 {
 		t.Fail()
 	}
 }
 
 func TestSetExitCode(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	j.SetExitCode(1)
 	if j.ExitCode() != 1 {
 		t.Fail()
@@ -311,14 +311,14 @@ func TestSetExitCode(t *testing.T) {
 }
 
 func TestCmdPtr(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	if j.CmdPtr() != nil {
 		t.Fail()
 	}
 }
 
 func TestSetCmdPtr(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	c := exec.Command("echo", "true")
 	j.SetCmdPtr(c)
 	if j.CmdPtr() != c {
@@ -327,14 +327,14 @@ func TestSetCmdPtr(t *testing.T) {
 }
 
 func TestUUID(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	if j.UUID() != "" {
 		t.Fail()
 	}
 }
 
 func TestSetUUID(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	u := uuid.New()
 	j.SetUUID(u)
 	if j.UUID() != u {
@@ -343,7 +343,7 @@ func TestSetUUID(t *testing.T) {
 }
 
 func TestPrepare(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	var c string
 	var e map[string]string
 	go func() {
@@ -363,7 +363,7 @@ func TestPrepare(t *testing.T) {
 }
 
 func TestJobStart(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	j.Prepare("echo foo", map[string]string{})
 	j.Start()
 	j.MonitorState()
@@ -373,7 +373,7 @@ func TestJobStart(t *testing.T) {
 }
 
 func TestMonitorState1(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	j.Prepare("while true; do echo 1; done", map[string]string{})
 	j.Start()
 	j.MonitorState()
@@ -384,7 +384,7 @@ func TestMonitorState1(t *testing.T) {
 }
 
 func TestJobWait(t *testing.T) {
-	j := NewBashJob()
+	j := NewBashCommand()
 	j.Prepare("echo true", map[string]string{})
 	j.Start()
 	j.MonitorState()
@@ -399,7 +399,7 @@ func TestJobWait(t *testing.T) {
 
 func TestRegistryRegister(t *testing.T) {
 	r := NewRegistry()
-	s := NewBashJob()
+	s := NewBashCommand()
 	r.Register("testing", s)
 	foundjob := r.HasKey("testing")
 	if !foundjob {
@@ -409,7 +409,7 @@ func TestRegistryRegister(t *testing.T) {
 
 func TestRegistryGet(t *testing.T) {
 	r := NewRegistry()
-	s := NewBashJob()
+	s := NewBashCommand()
 	r.Register("testing", s)
 	get := r.Get("testing")
 	if get != s {
@@ -419,7 +419,7 @@ func TestRegistryGet(t *testing.T) {
 
 func TestRegistryHasKey(t *testing.T) {
 	r := NewRegistry()
-	s := NewBashJob()
+	s := NewBashCommand()
 	r.Register("testing", s)
 	if !r.HasKey("testing") {
 		t.Fail()
@@ -431,7 +431,7 @@ func TestRegistryHasKey(t *testing.T) {
 
 func TestRegistryDelete(t *testing.T) {
 	r := NewRegistry()
-	s := NewBashJob()
+	s := NewBashCommand()
 	r.Register("testing", s)
 	r.Delete("testing")
 	if r.HasKey("testing") {
@@ -441,7 +441,7 @@ func TestRegistryDelete(t *testing.T) {
 
 func TestRegistryList(t *testing.T) {
 	r := NewRegistry()
-	s := NewBashJob()
+	s := NewBashCommand()
 	r.Register("testing", s)
 	r.Register("testing2", s)
 	r.Register("testing3", s)
@@ -476,7 +476,7 @@ func TestExecutorLaunch(t *testing.T) {
 
 func TestExecutorExecute(t *testing.T) {
 	e := NewExecutor()
-	s := NewBashJob()
+	s := NewBashCommand()
 	ec := make(chan int)
 	go func() {
 		<-s.completed

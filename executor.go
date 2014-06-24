@@ -134,7 +134,7 @@ func NewExecutor() *Executor {
 
 // Launch fires off a new job, adding a Job instance to the job registry.
 func (e *Executor) Launch(command string, environment map[string]string) string {
-	job := NewBashJob()
+	job := NewBashCommand()
 	jobID := uuid.New()
 	job.SetUUID(jobID)
 	e.Registry.Register(jobID, job)
@@ -146,7 +146,7 @@ func (e *Executor) Launch(command string, environment map[string]string) string 
 
 // Execute fires off a goroutine that calls a jobs Start(), MonitorState(), and
 // Wait() methods. Execute itself does not block.
-func (e *Executor) Execute(j *BashJob) {
+func (e *Executor) Execute(j *BashCommand) {
 	log.Printf("Executing job %s.", j.UUID())
 	go func() {
 		uuid := j.UUID()

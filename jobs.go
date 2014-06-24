@@ -1,15 +1,94 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os/exec"
 	"sync"
 )
 
-// BashJob contains all of the state associated with a job. You'll primarily
+// JobCommand is an interface for any commands that can be executed as part of
+// a job.
+type JobCommand interface {
+	SetUUID(uuid string)
+	UUID() string
+	MonitorState()
+	Wait()
+	Start(w *io.Writer)
+	Prepare(c interface{}, e interface{})
+	Kill()
+}
+
+// Job is a type that contains one or more JobCommands to be run.
+type Job struct {
+	commands       []JobCommand //List of job commands to be run.
+	commandsLock   *sync.RWMutex
+	current        string //UUID of the currently running command.
+	currentLock    *sync.RWMutex
+	uuid           string //UUID of the Job
+	uuidLock       *sync.RWMutex
+	outputRegistry *outputRegistry
+}
+
+// NewJob returns a pointer to a new instance of Job.
+func NewJob() *Job {
+	return &Job{
+		commands:       make([]JobCommand, 0),
+		commandsLock:   &sync.RWMutex{},
+		current:        "",
+		currentLock:    &sync.RWMutex{},
+		uuid:           "",
+		uuidLock:       &sync.RWMutex{},
+		outputRegistry: NewOutputRegistry(),
+	}
+}
+
+// Commands returns a copy of the JobCommand list.
+func (j *Job) Commands() []JobCommand {
+	j.commandsLock.RLock()
+	defer j.commandsLock.RUnlock()
+	return j.commands
+}
+
+// AddCommand appends a new JobCommand to the command list.
+func (j *Job) AddCommand(c JobCommand) {
+	j.commandsLock.Lock()
+	defer j.commandsLock.Unlock()
+	j.commands = append(j.commands, c)
+}
+
+// Current returns the UUID of the current running command.
+func (j *Job) Current() string {
+	j.currentLock.RLock()
+	defer j.currentLock.RUnlock()
+	return j.current
+}
+
+// SetCurrent sets the UUID of the current running command.
+func (j *Job) SetCurrent(c string) {
+	j.currentLock.Lock()
+	defer j.currentLock.Unlock()
+	j.current = c
+}
+
+// UUID returns the UUID of the Job.
+func (j *Job) UUID() string {
+	j.uuidLock.RLock()
+	defer j.uuidLock.RUnlock()
+	return j.uuid
+}
+
+// SetUUID sets the UUID of the Job.
+func (j *Job) SetUUID(u string) {
+	j.uuidLock.Lock()
+	defer j.uuidLock.Unlock()
+	j.uuid = u
+}
+
+// BashCommand contains all of the state associated with a job. You'll primarily
 // interact with a job through methods associated with Job.
-type BashJob struct {
-	cmds           chan bashJobCmd
+type BashCommand struct {
+	cmds           chan bashCommandCmd
 	command        chan string
 	done           chan error
 	abort          chan int
@@ -30,20 +109,20 @@ type BashJob struct {
 	uuidLock       *sync.Mutex
 }
 
-type bashJobAction int
+type bashCommandAction int
 
 const (
-	bashJobQuit bashJobAction = iota
+	bashCommandQuit bashCommandAction = iota
 )
 
-type bashJobCmd struct {
-	action bashJobAction
+type bashCommandCmd struct {
+	action bashCommandAction
 }
 
-// NewBashJob returns a pointer to a new instance of Job.
-func NewBashJob() *BashJob {
-	j := &BashJob{
-		cmds:           make(chan bashJobCmd),
+// NewBashCommand returns a pointer to a new instance of Job.
+func NewBashCommand() *BashCommand {
+	j := &BashCommand{
+		cmds:           make(chan bashCommandCmd),
 		command:        make(chan string),
 		done:           make(chan error),
 		abort:          make(chan int),
@@ -67,7 +146,7 @@ func NewBashJob() *BashJob {
 	return j
 }
 
-func (j *BashJob) run() {
+func (j *BashCommand) run() {
 	select {
 	case <-j.cmds:
 		j.OutputRegistry.Quit()
@@ -77,14 +156,14 @@ func (j *BashJob) run() {
 }
 
 // SetKilled sets the killed field for a Job. Should be threadsafe.
-func (j *BashJob) SetKilled(k bool) {
+func (j *BashCommand) SetKilled(k bool) {
 	j.killedLock.Lock()
 	j.killed = k
 	j.killedLock.Unlock()
 }
 
 // Killed gets the killed field for a Job. Should be threadsafe.
-func (j *BashJob) Killed() bool {
+func (j *BashCommand) Killed() bool {
 	var retval bool
 	j.killedLock.Lock()
 	retval = j.killed
@@ -93,14 +172,14 @@ func (j *BashJob) Killed() bool {
 }
 
 // SetExitCode sets the exitCode field for a Job. Should be threadsafe.
-func (j *BashJob) SetExitCode(e int) {
+func (j *BashCommand) SetExitCode(e int) {
 	j.exitCodeLock.Lock()
 	j.exitCode = e
 	j.exitCodeLock.Unlock()
 }
 
 // ExitCode gets the exitCode from a Job. Should be threadsafe.
-func (j *BashJob) ExitCode() int {
+func (j *BashCommand) ExitCode() int {
 	var retval int
 	j.exitCodeLock.Lock()
 	retval = j.exitCode
@@ -110,7 +189,7 @@ func (j *BashJob) ExitCode() int {
 
 // SetCmdPtr sets the pointer to an exec.Cmd instance for the Job. Should
 // be threadsafe.
-func (j *BashJob) SetCmdPtr(p *exec.Cmd) {
+func (j *BashCommand) SetCmdPtr(p *exec.Cmd) {
 	j.cmdPtrLock.Lock()
 	j.cmdPtr = p
 	j.cmdPtrLock.Unlock()
@@ -119,7 +198,7 @@ func (j *BashJob) SetCmdPtr(p *exec.Cmd) {
 // CmdPtr gets the pointer to an exec.Cmd instance that's associated with
 // the Job. Should be threadsafe, but don't don't mutate any state on the
 // returned pointer or bad things could happen.
-func (j *BashJob) CmdPtr() *exec.Cmd {
+func (j *BashCommand) CmdPtr() *exec.Cmd {
 	var retval *exec.Cmd
 	j.cmdPtrLock.Lock()
 	retval = j.cmdPtr
@@ -128,14 +207,14 @@ func (j *BashJob) CmdPtr() *exec.Cmd {
 }
 
 // SetUUID sets the UUID for a Job.
-func (j *BashJob) SetUUID(uuid string) {
+func (j *BashCommand) SetUUID(uuid string) {
 	j.uuidLock.Lock()
 	j.uuid = uuid
 	j.uuidLock.Unlock()
 }
 
 // UUID gets the UUID for a Job.
-func (j *BashJob) UUID() string {
+func (j *BashCommand) UUID() string {
 	var retval string
 	j.uuidLock.Lock()
 	retval = j.uuid
@@ -145,20 +224,20 @@ func (j *BashJob) UUID() string {
 
 // Write sends the []byte array passed out on RoutineWriter's OutChannel. This
 // should allow a Job instance to replace an io.Writer.
-func (j *BashJob) Write(p []byte) (n int, err error) {
+func (j *BashCommand) Write(p []byte) (n int, err error) {
 	j.OutputRegistry.Input <- p
 	return len(p), nil
 }
 
 // Quit tells the Job to clean up after itself.
-func (j *BashJob) Quit() {
-	j.cmds <- bashJobCmd{action: bashJobQuit}
+func (j *BashCommand) Quit() {
+	j.cmds <- bashCommandCmd{action: bashCommandQuit}
 }
 
 // MonitorState fires off two goroutines: one that waits for a message on the
 // Kill, Completed, or abort channels, and another one that calls Wait() on
 // the command that's running. Do not call this method before Start().
-func (j *BashJob) MonitorState() {
+func (j *BashCommand) MonitorState() {
 	go func() {
 		uuid := j.UUID()
 		for {
@@ -190,7 +269,7 @@ func (j *BashJob) MonitorState() {
 }
 
 // Wait blocks until the running job is completed.
-func (j *BashJob) Wait() {
+func (j *BashCommand) Wait() {
 	defer j.Quit()
 	uuid := j.UUID()
 	cmd := j.CmdPtr()
@@ -224,7 +303,7 @@ func (j *BashJob) Wait() {
 // Start gets the job running. The job will not begin until a command is set,
 // the environment is set, and the begin channel receives a message. The best
 // way to do all that is with the Prepare() method.
-func (j *BashJob) Start() {
+func (j *BashCommand) Start() {
 	shouldStart := false
 	var cmdString string
 	var environment map[string]string
@@ -259,7 +338,7 @@ func (j *BashJob) Start() {
 // Prepare allows the caller to set the command and environment for the job.
 // Call this before or after Start(). It doesn't matter when, but it must be
 // called.
-func (j *BashJob) Prepare(command string, environment map[string]string) {
+func (j *BashCommand) Prepare(command string, environment map[string]string) {
 	go func() {
 		j.command <- command
 		j.environment <- environment
@@ -269,6 +348,6 @@ func (j *BashJob) Prepare(command string, environment map[string]string) {
 }
 
 // Kill kills a job.
-func (j *BashJob) Kill() {
+func (j *BashCommand) Kill() {
 	j.kill <- 1
 }
