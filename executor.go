@@ -136,7 +136,7 @@ type Job struct {
 	cmdPtr         *exec.Cmd
 	cmdPtrLock     *sync.Mutex
 	OutputRegistry *outputRegistry
-	UUID           string
+	uuid           string
 	uuidLock       *sync.Mutex
 }
 
@@ -170,7 +170,7 @@ func NewJob() *Job {
 		cmdPtr:         nil,
 		cmdPtrLock:     &sync.Mutex{},
 		OutputRegistry: NewOutputRegistry(),
-		UUID:           "",
+		uuid:           "",
 		uuidLock:       &sync.Mutex{},
 	}
 	go j.run()
@@ -193,8 +193,8 @@ func (j *Job) SetKilled(k bool) {
 	j.killedLock.Unlock()
 }
 
-// GetKilled gets the killed field for a Job. Should be threadsafe.
-func (j *Job) GetKilled() bool {
+// Killed gets the killed field for a Job. Should be threadsafe.
+func (j *Job) Killed() bool {
 	var retval bool
 	j.killedLock.Lock()
 	retval = j.killed
@@ -209,8 +209,8 @@ func (j *Job) SetExitCode(e int) {
 	j.exitCodeLock.Unlock()
 }
 
-// GetExitCode gets the exitCode from a Job. Should be threadsafe.
-func (j *Job) GetExitCode() int {
+// ExitCode gets the exitCode from a Job. Should be threadsafe.
+func (j *Job) ExitCode() int {
 	var retval int
 	j.exitCodeLock.Lock()
 	retval = j.exitCode
@@ -226,10 +226,10 @@ func (j *Job) SetCmdPtr(p *exec.Cmd) {
 	j.cmdPtrLock.Unlock()
 }
 
-// GetCmdPtr gets the pointer to an exec.Cmd instance that's associated with
+// CmdPtr gets the pointer to an exec.Cmd instance that's associated with
 // the Job. Should be threadsafe, but don't don't mutate any state on the
 // returned pointer or bad things could happen.
-func (j *Job) GetCmdPtr() *exec.Cmd {
+func (j *Job) CmdPtr() *exec.Cmd {
 	var retval *exec.Cmd
 	j.cmdPtrLock.Lock()
 	retval = j.cmdPtr
@@ -240,15 +240,15 @@ func (j *Job) GetCmdPtr() *exec.Cmd {
 // SetUUID sets the UUID for a Job.
 func (j *Job) SetUUID(uuid string) {
 	j.uuidLock.Lock()
-	j.UUID = uuid
+	j.uuid = uuid
 	j.uuidLock.Unlock()
 }
 
-// GetUUID gets the UUID for a Job.
-func (j *Job) GetUUID() string {
+// UUID gets the UUID for a Job.
+func (j *Job) UUID() string {
 	var retval string
 	j.uuidLock.Lock()
-	retval = j.UUID
+	retval = j.uuid
 	j.uuidLock.Unlock()
 	return retval
 }
@@ -270,12 +270,12 @@ func (j *Job) Quit() {
 // the command that's running. Do not call this method before Start().
 func (j *Job) MonitorState() {
 	go func() {
-		uuid := j.GetUUID()
+		uuid := j.UUID()
 		for {
 			select {
 			case <-j.kill:
 				j.SetKilled(true)
-				cmdptr := j.GetCmdPtr()
+				cmdptr := j.CmdPtr()
 				if cmdptr != nil {
 					cmdptr.Process.Kill()
 				}
@@ -290,8 +290,8 @@ func (j *Job) MonitorState() {
 		}
 	}()
 	go func() {
-		cmdptr := j.GetCmdPtr()
-		uuid := j.GetUUID()
+		cmdptr := j.CmdPtr()
+		uuid := j.UUID()
 		select {
 		case j.done <- cmdptr.Wait():
 			log.Printf("Job %s is no longer in the Wait state.", uuid)
@@ -302,16 +302,16 @@ func (j *Job) MonitorState() {
 // Wait blocks until the running job is completed.
 func (j *Job) Wait() {
 	defer j.Quit()
-	uuid := j.GetUUID()
-	cmd := j.GetCmdPtr()
+	uuid := j.UUID()
+	cmd := j.CmdPtr()
 	select {
 	case err := <-j.done:
-		if j.GetKilled() { //Job killed
+		if j.Killed() { //Job killed
 			j.SetExitCode(-100)
 			j.completed <- 1
 			return
 		}
-		if err == nil && j.GetExitCode() == -9000 { //Job exited normally
+		if err == nil && j.ExitCode() == -9000 { //Job exited normally
 			if cmd.ProcessState != nil {
 				j.SetExitCode(exitCode(cmd))
 			} else {
@@ -325,7 +325,7 @@ func (j *Job) Wait() {
 				j.SetExitCode(1)
 			}
 		}
-		log.Printf("Job %s exited with a status of %d.", uuid, j.GetExitCode())
+		log.Printf("Job %s exited with a status of %d.", uuid, j.ExitCode())
 		j.completed <- 1
 		return
 	}
@@ -363,7 +363,7 @@ func (j *Job) Start() {
 		j.abort <- 1
 		return
 	}
-	log.Printf("Started job %s.", j.GetUUID())
+	log.Printf("Started job %s.", j.UUID())
 }
 
 // Prepare allows the caller to set the command and environment for the job.
@@ -403,7 +403,7 @@ func NewExecutor() *Executor {
 func (e *Executor) Launch(command string, environment map[string]string) string {
 	job := NewJob()
 	jobID := uuid.New()
-	job.UUID = jobID
+	job.SetUUID(jobID)
 	e.Registry.Register(jobID, job)
 	log.Printf("Registering job %s.", jobID)
 	job.Prepare(command, environment)
@@ -414,9 +414,9 @@ func (e *Executor) Launch(command string, environment map[string]string) string 
 // Execute fires off a goroutine that calls a jobs Start(), MonitorState(), and
 // Wait() methods. Execute itself does not block.
 func (e *Executor) Execute(j *Job) {
-	log.Printf("Executing job %s.", j.UUID)
+	log.Printf("Executing job %s.", j.UUID())
 	go func() {
-		uuid := j.GetUUID()
+		uuid := j.UUID()
 		defer e.Registry.Delete(uuid)
 		j.Start()
 		j.MonitorState()

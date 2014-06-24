@@ -280,9 +280,9 @@ func TestJobWrite(t *testing.T) {
 	}
 }
 
-func TestJobGetKilled(t *testing.T) {
+func TestJobKilled(t *testing.T) {
 	j := NewJob()
-	if j.GetKilled() {
+	if j.Killed() {
 		t.Fail()
 	}
 }
@@ -290,14 +290,14 @@ func TestJobGetKilled(t *testing.T) {
 func TestJobSetKilled(t *testing.T) {
 	j := NewJob()
 	j.SetKilled(true)
-	if !j.GetKilled() {
+	if !j.Killed() {
 		t.Fail()
 	}
 }
 
 func TestGetExitCode(t *testing.T) {
 	j := NewJob()
-	if j.GetExitCode() != -9000 {
+	if j.ExitCode() != -9000 {
 		t.Fail()
 	}
 }
@@ -305,14 +305,14 @@ func TestGetExitCode(t *testing.T) {
 func TestSetExitCode(t *testing.T) {
 	j := NewJob()
 	j.SetExitCode(1)
-	if j.GetExitCode() != 1 {
+	if j.ExitCode() != 1 {
 		t.Fail()
 	}
 }
 
-func TestGetCmdPtr(t *testing.T) {
+func TestCmdPtr(t *testing.T) {
 	j := NewJob()
-	if j.GetCmdPtr() != nil {
+	if j.CmdPtr() != nil {
 		t.Fail()
 	}
 }
@@ -321,14 +321,14 @@ func TestSetCmdPtr(t *testing.T) {
 	j := NewJob()
 	c := exec.Command("echo", "true")
 	j.SetCmdPtr(c)
-	if j.GetCmdPtr() != c {
+	if j.CmdPtr() != c {
 		t.Fail()
 	}
 }
 
-func TestGetUUID(t *testing.T) {
+func TestUUID(t *testing.T) {
 	j := NewJob()
-	if j.GetUUID() != "" {
+	if j.UUID() != "" {
 		t.Fail()
 	}
 }
@@ -337,7 +337,7 @@ func TestSetUUID(t *testing.T) {
 	j := NewJob()
 	u := uuid.New()
 	j.SetUUID(u)
-	if j.GetUUID() != u {
+	if j.UUID() != u {
 		t.Fail()
 	}
 }
@@ -367,7 +367,7 @@ func TestJobStart(t *testing.T) {
 	j.Prepare("echo foo", map[string]string{})
 	j.Start()
 	j.MonitorState()
-	if j.GetCmdPtr() == nil {
+	if j.CmdPtr() == nil {
 		t.Errorf("Start resulted in a nil CmdPtr.")
 	}
 }
@@ -378,7 +378,7 @@ func TestMonitorState1(t *testing.T) {
 	j.Start()
 	j.MonitorState()
 	j.Kill()
-	if !j.GetKilled() {
+	if !j.Killed() {
 		t.Fail()
 	}
 }
@@ -389,10 +389,10 @@ func TestJobWait(t *testing.T) {
 	j.Start()
 	j.MonitorState()
 	j.Wait()
-	if j.GetKilled() {
+	if j.Killed() {
 		t.Fail()
 	}
-	if j.GetExitCode() == -9000 {
+	if j.ExitCode() == -9000 {
 		t.Fail()
 	}
 }
@@ -480,7 +480,7 @@ func TestExecutorExecute(t *testing.T) {
 	ec := make(chan int)
 	go func() {
 		<-s.completed
-		ec <- s.GetExitCode()
+		ec <- s.ExitCode()
 	}()
 	s.SetUUID("blippy")
 	s.Prepare("echo $FOO", map[string]string{"FOO": "BAR"})
@@ -500,14 +500,14 @@ func TestExecutorKill(t *testing.T) {
 	coord := make(chan int)
 	go func() {
 		<-s.completed
-		coord <- s.GetExitCode()
+		coord <- s.ExitCode()
 	}()
 	e.Kill(jobid)
 	exit := <-coord
 	if exit != -100 {
 		t.Errorf("Exit code for the kill command wasn't -100.")
 	}
-	if !s.GetKilled() {
+	if !s.Killed() {
 		t.Errorf("The Job.Killed field wasn't false.")
 	}
 	if e.Registry.HasKey(jobid) {
