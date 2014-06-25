@@ -116,15 +116,13 @@ func (j *Job) Kill() {
 // them one after the other. Prepare() should have been called on each command
 // before Run() is called.
 func (j *Job) Run() {
-	go func() {
-		for _, c := range j.Commands() {
-			j.SetCurrent(c)
-			c.Start(j.OutputRegistry)
-			c.MonitorState()
-			c.Wait()
-		}
-		j.SetCompleted(true)
-	}()
+	for _, c := range j.Commands() {
+		j.SetCurrent(c)
+		c.Start(j.OutputRegistry)
+		c.MonitorState()
+		c.Wait()
+	}
+	j.SetCompleted(true)
 }
 
 // BashCommand contains all of the state associated with a command run through

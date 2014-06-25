@@ -145,7 +145,10 @@ func (e *Executor) Execute(cmds *[]JSONCmd) string {
 		bash.Prepare(c.CommandLine, c.Environment)
 		job.AddCommand(bash)
 	}
-	job.Run()
+	go func(jid string) {
+		job.Run()
+		e.Registry.Delete(jid)
+	}(jobID)
 	return jobID
 }
 
