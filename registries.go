@@ -31,17 +31,17 @@ func NewRegistry() Registry {
 
 type registryFindResult struct {
 	found  bool
-	result *BashCommand
+	result *Job
 }
 
 // run launches a goroutine that can be communicated with by the Registry
 // channel.
 func (r Registry) run() {
-	reg := make(map[string]*BashCommand)
+	reg := make(map[string]*Job)
 	for command := range r {
 		switch command.action {
 		case set:
-			reg[command.key] = command.value.(*BashCommand)
+			reg[command.key] = command.value.(*Job)
 		case get:
 			val, found := reg[command.key]
 			command.result <- registryFindResult{found, val}
@@ -62,12 +62,12 @@ func (r Registry) run() {
 }
 
 // Register associates 'uuid' with a *Job in the registry.
-func (r Registry) Register(uuid string, s *BashCommand) {
+func (r Registry) Register(uuid string, s *Job) {
 	r <- registryCommand{action: set, key: uuid, value: s}
 }
 
 // Get returns the *Job for the given uuid in the registry.
-func (r Registry) Get(uuid string) *BashCommand {
+func (r Registry) Get(uuid string) *Job {
 	reply := make(chan interface{})
 	regCmd := registryCommand{action: get, key: uuid, result: reply}
 	r <- regCmd
@@ -164,6 +164,13 @@ func (o *outputRegistry) run() {
 			}
 		}
 	}
+}
+
+// Write sends the []byte array passed out on the Input channel. This
+// should allow a BashCommand instance to replace an io.Writer.
+func (o *outputRegistry) Write(p []byte) (n int, err error) {
+	o.Input <- p
+	return len(p), nil
 }
 
 // AddListener creates a OutputListener, adds it to the OutputRegistry,

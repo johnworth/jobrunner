@@ -14,8 +14,8 @@ type JobCommand interface {
 	UUID() string
 	MonitorState()
 	Wait()
-	Start(w *io.Writer)
-	Prepare(c interface{}, e interface{})
+	Start(w io.Writer)
+	Prepare(c string, e map[string]string)
 	Kill()
 }
 
@@ -24,10 +24,13 @@ type Job struct {
 	commands       []JobCommand //List of job commands to be run.
 	commandsLock   *sync.RWMutex
 	current        string //UUID of the currently running command.
+	currentCommand *JobCommand
 	currentLock    *sync.RWMutex
 	uuid           string //UUID of the Job
 	uuidLock       *sync.RWMutex
-	outputRegistry *outputRegistry
+	OutputRegistry *outputRegistry
+	completed      bool
+	completedLock  *sync.RWMutex
 }
 
 // NewJob returns a pointer to a new instance of Job.
@@ -35,11 +38,13 @@ func NewJob() *Job {
 	return &Job{
 		commands:       make([]JobCommand, 0),
 		commandsLock:   &sync.RWMutex{},
-		current:        "",
+		currentCommand: nil,
 		currentLock:    &sync.RWMutex{},
 		uuid:           "",
 		uuidLock:       &sync.RWMutex{},
-		outputRegistry: NewOutputRegistry(),
+		OutputRegistry: NewOutputRegistry(),
+		completed:      false,
+		completedLock:  &sync.RWMutex{},
 	}
 }
 
@@ -65,10 +70,10 @@ func (j *Job) Current() string {
 }
 
 // SetCurrent sets the UUID of the current running command.
-func (j *Job) SetCurrent(c string) {
+func (j *Job) SetCurrent(c JobCommand) {
 	j.currentLock.Lock()
 	defer j.currentLock.Unlock()
-	j.current = c
+	j.currentCommand = &c
 }
 
 // UUID returns the UUID of the Job.
@@ -85,74 +90,87 @@ func (j *Job) SetUUID(u string) {
 	j.uuid = u
 }
 
+// Completed returns true if the Job is done.
+func (j *Job) Completed() bool {
+	j.completedLock.RLock()
+	defer j.completedLock.RUnlock()
+	return j.completed
+}
+
+// SetCompleted sets the completion value.
+func (j *Job) SetCompleted(c bool) {
+	j.completedLock.Lock()
+	defer j.completedLock.Unlock()
+	j.completed = c
+}
+
+// Kill sends the currently running job a SIGKILL and shuts down the output
+// registry.
+func (j *Job) Kill() {
+	cc := *j.currentCommand
+	cc.Kill()
+	j.OutputRegistry.Quit()
+}
+
+// Run fires off a gorouting that iterates through the commands list and runs
+// them one after the other. Prepare() should have been called on each command
+// before Run() is called.
+func (j *Job) Run() {
+	go func() {
+		for _, c := range j.Commands() {
+			j.SetCurrent(c)
+			c.Start(j.OutputRegistry)
+			c.MonitorState()
+			c.Wait()
+		}
+		j.SetCompleted(true)
+	}()
+}
+
 // BashCommand contains all of the state associated with a command run through
 // bash.
 type BashCommand struct {
-	cmds           chan bashCommandCmd
-	command        chan string
-	done           chan error
-	abort          chan int
-	environment    chan map[string]string
-	begin          chan int
-	began          chan int
-	kill           chan int
-	killed         bool
-	killedLock     *sync.Mutex
-	Output         chan []byte
-	exitCode       int
-	exitCodeLock   *sync.Mutex
-	completed      chan int
-	cmdPtr         *exec.Cmd
-	cmdPtrLock     *sync.Mutex
-	OutputRegistry *outputRegistry
-	uuid           string
-	uuidLock       *sync.Mutex
-}
-
-type bashCommandAction int
-
-const (
-	bashCommandQuit bashCommandAction = iota
-)
-
-type bashCommandCmd struct {
-	action bashCommandAction
+	command      chan string
+	done         chan error
+	abort        chan int
+	environment  chan map[string]string
+	begin        chan int
+	began        chan int
+	kill         chan int
+	killed       bool
+	killedLock   *sync.Mutex
+	Output       chan []byte
+	exitCode     int
+	exitCodeLock *sync.Mutex
+	completed    chan int
+	cmdPtr       *exec.Cmd
+	cmdPtrLock   *sync.Mutex
+	uuid         string
+	uuidLock     *sync.Mutex
 }
 
 // NewBashCommand returns a pointer to a new instance of BashCommand.
 func NewBashCommand() *BashCommand {
 	j := &BashCommand{
-		cmds:           make(chan bashCommandCmd),
-		command:        make(chan string),
-		done:           make(chan error),
-		abort:          make(chan int),
-		environment:    make(chan map[string]string),
-		begin:          make(chan int),
-		began:          make(chan int),
-		kill:           make(chan int),
-		killed:         false,
-		killedLock:     &sync.Mutex{},
-		Output:         make(chan []byte),
-		exitCode:       -9000,
-		exitCodeLock:   &sync.Mutex{},
-		completed:      make(chan int),
-		cmdPtr:         nil,
-		cmdPtrLock:     &sync.Mutex{},
-		OutputRegistry: NewOutputRegistry(),
-		uuid:           "",
-		uuidLock:       &sync.Mutex{},
+		command:      make(chan string),
+		done:         make(chan error),
+		abort:        make(chan int),
+		environment:  make(chan map[string]string),
+		begin:        make(chan int),
+		began:        make(chan int),
+		kill:         make(chan int),
+		killed:       false,
+		killedLock:   &sync.Mutex{},
+		Output:       make(chan []byte),
+		exitCode:     -9000,
+		exitCodeLock: &sync.Mutex{},
+		completed:    make(chan int),
+		cmdPtr:       nil,
+		cmdPtrLock:   &sync.Mutex{},
+		uuid:         "",
+		uuidLock:     &sync.Mutex{},
 	}
-	go j.run()
 	return j
-}
-
-func (j *BashCommand) run() {
-	select {
-	case <-j.cmds:
-		j.OutputRegistry.Quit()
-		close(j.cmds)
-
-	}
 }
 
 // SetKilled sets the killed field for a BashCommand. Should be threadsafe.
@@ -198,7 +216,7 @@ func (j *BashCommand) SetCmdPtr(p *exec.Cmd) {
 // CmdPtr gets the pointer to an exec.Cmd instance that's associated with
 // the BashCommand. Should be threadsafe, but don't don't mutate any state on
 // the returned pointer or bad things could happen.
-func (j *BashCommand) CmdPtr() *exec.Cmd {
+func (j BashCommand) CmdPtr() *exec.Cmd {
 	var retval *exec.Cmd
 	j.cmdPtrLock.Lock()
 	retval = j.cmdPtr
@@ -220,18 +238,6 @@ func (j *BashCommand) UUID() string {
 	retval = j.uuid
 	j.uuidLock.Unlock()
 	return retval
-}
-
-// Write sends the []byte array passed out on RoutineWriter's OutChannel. This
-// should allow a BashCommand instance to replace an io.Writer.
-func (j *BashCommand) Write(p []byte) (n int, err error) {
-	j.OutputRegistry.Input <- p
-	return len(p), nil
-}
-
-// Quit tells the BashCommand to clean up after itself.
-func (j *BashCommand) Quit() {
-	j.cmds <- bashCommandCmd{action: bashCommandQuit}
 }
 
 // MonitorState fires off two goroutines: one that waits for a message on the
@@ -270,7 +276,6 @@ func (j *BashCommand) MonitorState() {
 
 // Wait blocks until the running command is completed.
 func (j *BashCommand) Wait() {
-	defer j.Quit()
 	uuid := j.UUID()
 	cmd := j.CmdPtr()
 	select {
@@ -303,7 +308,7 @@ func (j *BashCommand) Wait() {
 // Start gets the command running. The job will not begin until a command is set,
 // the environment is set, and the begin channel receives a message. The best
 // way to do all that is with the Prepare() method.
-func (j *BashCommand) Start() {
+func (j *BashCommand) Start(w io.Writer) {
 	shouldStart := false
 	var cmdString string
 	var environment map[string]string
@@ -322,8 +327,8 @@ func (j *BashCommand) Start() {
 	}
 	cmd = exec.Command("bash", "-c", cmdString)
 	cmd.Env = formatEnv(environment)
-	cmd.Stdout = j
-	cmd.Stderr = j
+	cmd.Stdout = w
+	cmd.Stderr = w
 	j.SetCmdPtr(cmd)
 	err := cmd.Start()
 	j.began <- 1

@@ -11,7 +11,7 @@ import (
 
 func TestStart(t *testing.T) {
 	h := NewAPIHandlers()
-	reqBody := strings.NewReader("{\"CommandLine\":\"echo foo\", \"Environment\":{}}")
+	reqBody := strings.NewReader("{\"Commands\" : [{\"CommandLine\":\"echo foo\", \"Environment\":{}}]}")
 	req, err := http.NewRequest("POST", "http://localhost:8080/", reqBody)
 	if err != nil {
 		t.Fail()
@@ -54,8 +54,8 @@ func slicesEquivalent(s1 []string, s2 []string) bool {
 
 func TestList(t *testing.T) {
 	h := NewAPIHandlers()
-	reqBody := strings.NewReader("{\"CommandLine\":\"while true; do echo $FOO; done\", \"Environment\":{}}")
-	reqBody2 := strings.NewReader("{\"CommandLine\":\"while true; do echo $FOO; done\", \"Environment\":{}}")
+	reqBody := strings.NewReader("{\"Commands\" : [{\"CommandLine\":\"while true; do echo $FOO; done\", \"Environment\":{}}]}")
+	reqBody2 := strings.NewReader("{\"Commands\" : [{\"CommandLine\":\"while true; do echo $FOO; done\", \"Environment\":{}}]}")
 	startReq, err := http.NewRequest("POST", "http://localhost:8080/", reqBody)
 	if err != nil {
 		t.Fail()

@@ -132,29 +132,21 @@ func NewExecutor() *Executor {
 	return e
 }
 
-// Launch fires off a new job, adding a Job instance to the job registry.
-func (e *Executor) Launch(command string, environment map[string]string) string {
-	job := NewBashCommand()
+// Execute processes the JSONCmds passed in a Runs a job.
+func (e *Executor) Execute(cmds *[]JSONCmd) string {
 	jobID := uuid.New()
+	job := NewJob()
 	job.SetUUID(jobID)
 	e.Registry.Register(jobID, job)
 	log.Printf("Registering job %s.", jobID)
-	job.Prepare(command, environment)
-	e.Execute(job)
+	for _, c := range *cmds {
+		bash := NewBashCommand()
+		bash.SetUUID(uuid.New())
+		bash.Prepare(c.CommandLine, c.Environment)
+		job.AddCommand(bash)
+	}
+	job.Run()
 	return jobID
-}
-
-// Execute fires off a goroutine that calls a jobs Start(), MonitorState(), and
-// Wait() methods. Execute itself does not block.
-func (e *Executor) Execute(j *BashCommand) {
-	log.Printf("Executing job %s.", j.UUID())
-	go func() {
-		uuid := j.UUID()
-		defer e.Registry.Delete(uuid)
-		j.Start()
-		j.MonitorState()
-		j.Wait()
-	}()
 }
 
 // Kill terminates the specified job with extreme prejudice.
@@ -162,6 +154,7 @@ func (e *Executor) Kill(uuid string) {
 	if e.Registry.HasKey(uuid) {
 		job := e.Registry.Get(uuid)
 		job.Kill()
+		e.Registry.Delete(uuid)
 	}
 }
 

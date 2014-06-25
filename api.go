@@ -37,10 +37,16 @@ func init() {
 	expvar.Publish("addrs", expvar.Func(addrsAsStrings))
 }
 
-// StartMsg represents a job start request
-type StartMsg struct {
+// JSONCmd represents a single command for a job as sent by a client.
+type JSONCmd struct {
 	CommandLine string
 	Environment map[string]string
+	WorkingDir  string
+}
+
+// StartMsg represents a job start request
+type StartMsg struct {
+	Commands []JSONCmd
 }
 
 // IDMsg represents a ID response
@@ -70,15 +76,21 @@ func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 		http.Error(resp, err.Error(), 500)
 		return
 	}
-	if jobMsg.CommandLine == "" {
-		http.Error(resp, "Missing CommandLine key.", 500)
+	if jobMsg.Commands == nil {
+		http.Error(resp, "Missing JSONCommands key.", 500)
 		return
 	}
-	if jobMsg.Environment == nil {
-		http.Error(resp, "Missing Environment key.", 500)
-		return
+	for _, j := range jobMsg.Commands {
+		if j.CommandLine == "" {
+			http.Error(resp, "Missing CommandLine from command.", 500)
+			return
+		}
+		if j.Environment == nil {
+			http.Error(resp, "Missing Environment from command.", 500)
+			return
+		}
 	}
-	jid := h.Executor.Launch(jobMsg.CommandLine, jobMsg.Environment)
+	jid := h.Executor.Execute(&jobMsg.Commands)
 	returnMsg, err := json.Marshal(&IDMsg{
 		ID: jid,
 	})
@@ -123,11 +135,11 @@ func (h *APIHandlers) Attach(resp http.ResponseWriter, r *http.Request) {
 		http.Error(resp, fmt.Sprintf("Job %s not found.", ID), 404)
 		return
 	}
-	syncer := jobRegistry.Get(ID)
-	outputListener := syncer.OutputRegistry.AddListener()
+	job := jobRegistry.Get(ID)
+	outputListener := job.OutputRegistry.AddListener()
 	reader := NewOutputReader(outputListener)
 	defer reader.Quit()
-	defer syncer.OutputRegistry.RemoveListener(outputListener)
+	defer job.OutputRegistry.RemoveListener(outputListener)
 	io.Copy(resp, reader)
 }
 

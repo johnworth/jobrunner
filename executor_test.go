@@ -1,13 +1,15 @@
 package main
 
 import (
-	"fmt"
+	"encoding/json"
 	"io"
 	"os/exec"
 	"reflect"
-	"testing"
 
 	"code.google.com/p/go-uuid/uuid"
+
+	"testing"
+	"time"
 )
 
 func TestExitCode(t *testing.T) {
@@ -251,12 +253,12 @@ func TestOutputRegistryInput2(t *testing.T) {
 }
 
 func TestJobWrite(t *testing.T) {
-	s := NewBashCommand()
-	r := s.OutputRegistry
+	j := NewJob()
+	r := j.OutputRegistry
 	l1 := r.AddListener()
 	l2 := r.AddListener()
 	testbytes := []byte("testing")
-	s.Write(testbytes)
+	r.Write(testbytes)
 	var recv1 []byte
 	var recv2 []byte
 	for {
@@ -363,44 +365,51 @@ func TestPrepare(t *testing.T) {
 }
 
 func TestJobStart(t *testing.T) {
-	j := NewBashCommand()
-	j.Prepare("echo foo", map[string]string{})
-	j.Start()
-	j.MonitorState()
-	if j.CmdPtr() == nil {
+	j := NewJob()
+	b := NewBashCommand()
+	j.AddCommand(b)
+	b.Prepare("echo foo", map[string]string{})
+	b.Start(j.OutputRegistry)
+	b.MonitorState()
+	if b.CmdPtr() == nil {
 		t.Errorf("Start resulted in a nil CmdPtr.")
 	}
 }
 
 func TestMonitorState1(t *testing.T) {
-	j := NewBashCommand()
-	j.Prepare("while true; do echo 1; done", map[string]string{})
-	j.Start()
-	j.MonitorState()
-	j.Kill()
-	if !j.Killed() {
+	j := NewJob()
+	b := NewBashCommand()
+	j.AddCommand(b)
+	b.Prepare("while true; do echo 1; done", map[string]string{})
+	b.Start(j.OutputRegistry)
+	b.MonitorState()
+	b.Kill()
+	if !b.Killed() {
 		t.Fail()
 	}
 }
 
 func TestJobWait(t *testing.T) {
-	j := NewBashCommand()
-	j.Prepare("echo true", map[string]string{})
-	j.Start()
-	j.MonitorState()
-	j.Wait()
-	if j.Killed() {
+	j := NewJob()
+	b := NewBashCommand()
+	j.AddCommand(b)
+	b.Prepare("echo true", map[string]string{})
+	b.Start(j.OutputRegistry)
+	b.MonitorState()
+	b.Wait()
+	if b.Killed() {
 		t.Fail()
 	}
-	if j.ExitCode() == -9000 {
+	if b.ExitCode() == -9000 {
 		t.Fail()
 	}
 }
 
 func TestRegistryRegister(t *testing.T) {
+	j := NewJob()
 	r := NewRegistry()
-	s := NewBashCommand()
-	r.Register("testing", s)
+	j.SetUUID("testing")
+	r.Register("testing", j)
 	foundjob := r.HasKey("testing")
 	if !foundjob {
 		t.Fail()
@@ -409,7 +418,7 @@ func TestRegistryRegister(t *testing.T) {
 
 func TestRegistryGet(t *testing.T) {
 	r := NewRegistry()
-	s := NewBashCommand()
+	s := NewJob()
 	r.Register("testing", s)
 	get := r.Get("testing")
 	if get != s {
@@ -419,7 +428,7 @@ func TestRegistryGet(t *testing.T) {
 
 func TestRegistryHasKey(t *testing.T) {
 	r := NewRegistry()
-	s := NewBashCommand()
+	s := NewJob()
 	r.Register("testing", s)
 	if !r.HasKey("testing") {
 		t.Fail()
@@ -431,7 +440,7 @@ func TestRegistryHasKey(t *testing.T) {
 
 func TestRegistryDelete(t *testing.T) {
 	r := NewRegistry()
-	s := NewBashCommand()
+	s := NewJob()
 	r.Register("testing", s)
 	r.Delete("testing")
 	if r.HasKey("testing") {
@@ -441,7 +450,7 @@ func TestRegistryDelete(t *testing.T) {
 
 func TestRegistryList(t *testing.T) {
 	r := NewRegistry()
-	s := NewBashCommand()
+	s := NewJob()
 	r.Register("testing", s)
 	r.Register("testing2", s)
 	r.Register("testing3", s)
@@ -466,48 +475,43 @@ func TestRegistryList(t *testing.T) {
 	}
 }
 
-func TestExecutorLaunch(t *testing.T) {
-	r := NewExecutor()
-	jobid := r.Launch("echo foo", make(map[string]string))
-	if jobid == "" {
-		t.Fail()
-	}
-}
-
 func TestExecutorExecute(t *testing.T) {
+	var start StartMsg
+	jobsString := "{\"Commands\":[{\"CommandLine\":\"echo foo\", \"Environment\":{}}]}"
+	json.Unmarshal([]byte(jobsString), start)
 	e := NewExecutor()
-	s := NewBashCommand()
-	ec := make(chan int)
-	go func() {
-		<-s.completed
-		ec <- s.ExitCode()
-	}()
-	s.SetUUID("blippy")
-	s.Prepare("echo $FOO", map[string]string{"FOO": "BAR"})
-	e.Execute(s)
-	e.Registry.Register("blippy", s)
-	exit := <-ec
-	fmt.Println(exit)
-	if exit != 0 {
+	id := e.Execute(&start.Commands)
+	if id == "" {
 		t.Fail()
 	}
 }
 
 func TestExecutorKill(t *testing.T) {
+	var start StartMsg
+	jobString := "{\"Commands\":[{\"CommandLine\":\"while true; do echo foo; done\", \"Environment\":{}}]}"
+	json.Unmarshal([]byte(jobString), &start)
 	e := NewExecutor()
-	jobid := e.Launch("while true; do echo foo; done", make(map[string]string))
+	jobid := e.Execute(&start.Commands)
 	s := e.Registry.Get(jobid)
 	coord := make(chan int)
 	go func() {
-		<-s.completed
-		coord <- s.ExitCode()
+		for {
+			if s.Completed() {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		coord <- 1
 	}()
 	e.Kill(jobid)
-	exit := <-coord
+	<-coord
+	cmds := s.Commands()
+	lastJob := cmds[len(cmds)-1].(*BashCommand) //type JobCommand
+	exit := lastJob.ExitCode()
 	if exit != -100 {
 		t.Errorf("Exit code for the kill command wasn't -100.")
 	}
-	if !s.Killed() {
+	if !lastJob.Killed() {
 		t.Errorf("The Job.Killed field wasn't false.")
 	}
 	if e.Registry.HasKey(jobid) {
