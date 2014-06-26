@@ -136,10 +136,9 @@ func (h *APIHandlers) Attach(resp http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job := jobRegistry.Get(ID)
-	outputListener := job.OutputRegistry.AddListener()
-	reader := NewOutputReader(outputListener)
+	reader := job.OutputRegistry.AddListener()
 	defer reader.Quit()
-	defer job.OutputRegistry.RemoveListener(outputListener)
+	defer job.OutputRegistry.RemoveListener(reader)
 	io.Copy(resp, reader)
 }
 

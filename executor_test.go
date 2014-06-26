@@ -21,32 +21,26 @@ func TestExitCode(t *testing.T) {
 	}
 }
 
-func getOutputReader() *OutputReader {
-	jol := NewOutputListener()
-	return NewOutputReader(jol)
+func getOutputReader() OutputReader {
+	return NewOutputReader()
 }
 
 func TestOutputReaderQuitChannel(t *testing.T) {
 	r := getOutputReader()
 	r.Quit()
-	if !r.eof {
+	_, ok := <-r
+	if ok {
 		t.Fail()
 	}
 }
 
-func TestOutputReaderListernQuit(t *testing.T) {
-	r := getOutputReader()
-	r.listener.Quit <- 1
-	if !r.eof {
-		t.Fail()
-	}
-}
-
-func TestOutputReaderSendBytes(t *testing.T) {
+func TestOutputReaderWrite(t *testing.T) {
 	r := getOutputReader()
 	testBytes := []byte("testing")
-	r.listener.Listener <- testBytes
-	if !reflect.DeepEqual(r.accum, testBytes) {
+	buffer := make([]byte, 7)
+	r.Write(testBytes)
+	r.Read(buffer)
+	if !reflect.DeepEqual(buffer, testBytes) {
 		t.Fail()
 	}
 	r.Quit()
@@ -57,7 +51,7 @@ func TestOutputReaderSendBytes(t *testing.T) {
 func TestOutputReaderRead1(t *testing.T) {
 	r := getOutputReader()
 	testBytes := []byte("testing")
-	r.listener.Listener <- testBytes
+	r.Write(testBytes)
 	buf := make([]byte, len(testBytes))
 	read, err := r.Read(buf)
 	if err != nil {
@@ -76,7 +70,7 @@ func TestOutputReaderRead1(t *testing.T) {
 func TestOutputReaderRead2(t *testing.T) {
 	r := getOutputReader()
 	testBytes := []byte("testing")
-	r.listener.Listener <- testBytes
+	r.Write(testBytes)
 	buf := make([]byte, len(testBytes)-2)
 	read, err := r.Read(buf)
 	if err != nil {
@@ -96,12 +90,12 @@ func TestOutputReaderRead2(t *testing.T) {
 func TestOutputReaderRead3(t *testing.T) {
 	r := getOutputReader()
 	testBytes := []byte("testing")
-	r.listener.Listener <- testBytes
+	r.Write(testBytes)
 	buf := make([]byte, len(testBytes)-2)
 	buf2 := make([]byte, len(testBytes)-2)
 	read, err := r.Read(buf)
 	read, err = r.Read(buf2)
-	//EOF isn't set because a quit hasn't been sent to the reader.
+
 	if err != nil {
 		t.Fail()
 	}
@@ -114,59 +108,37 @@ func TestOutputReaderRead3(t *testing.T) {
 	r.Quit()
 }
 
-// TestOutputReaderRead4 tests a Read after quit is sent when the buffer is
-// smaller than the test value.
+// TestOutputReaderRead4 tests a second Read when the
+// buffer is smaller than the test value.
 func TestOutputReaderRead4(t *testing.T) {
 	r := getOutputReader()
 	testBytes := []byte("testing")
-	r.listener.Listener <- testBytes
+	r.Write(testBytes)
 	buf := make([]byte, len(testBytes)-2)
-	r.Quit()
 	read, err := r.Read(buf)
-	//EOF isn't set because there's still info left in the buffer.
-	if err != nil {
-		t.Fail()
+	read, err = r.Read(buf)
+	if err == io.EOF {
+		t.Errorf("io.EOF was returned as an error.")
 	}
-	if read != 5 {
-		t.Fail()
+	if read != 2 {
+		t.Errorf("Didn't read 2 bytes.")
 	}
-	if string(buf[:read]) != "testi" {
-		t.Fail()
+	if string(buf[:read]) != "ng" {
+		t.Errorf("The buffer didn't start with 'ng'.")
 	}
+	r.Quit()
 }
 
-// TestOutputReaderRead5 tests a second Read after quit is sent when the
-// buffer is smaller than the test value.
+// testOutputReaderRead5 test a Read when the buffer is
+// larger than the test value.
 func TestOutputReaderRead5(t *testing.T) {
 	r := getOutputReader()
 	testBytes := []byte("testing")
-	r.listener.Listener <- testBytes
-	buf := make([]byte, len(testBytes)-2)
-	r.Quit()
-	read, err := r.Read(buf)
-	read, err = r.Read(buf)
-	if err != io.EOF {
-		t.Fail()
-	}
-	if read != 2 {
-		t.Fail()
-	}
-	if string(buf[:read]) != "ng" {
-		t.Fail()
-	}
-}
-
-// testOutputReaderRead6 test a Read after quit is sent and the buffer is
-// larger than the test value.
-func TestOutputReaderRead6(t *testing.T) {
-	r := getOutputReader()
-	testBytes := []byte("testing")
-	r.listener.Listener <- testBytes
+	r.Write(testBytes)
 	buf := make([]byte, len(testBytes)+2)
-	r.Quit()
 	read, err := r.Read(buf)
-	if err != io.EOF {
-		t.Fail()
+	if err == io.EOF {
+		t.Errorf("io.EOF was returned as an error.")
 	}
 	if read != len(testBytes) {
 		t.Fail()
@@ -174,24 +146,25 @@ func TestOutputReaderRead6(t *testing.T) {
 	if string(buf[:read]) != string(testBytes[:]) {
 		t.Fail()
 	}
+	r.Quit()
 }
 
-// TestOutputReaderRead7 tests a second Read after quit is sent and the buffer
+// TestOutputReaderRead7 tests a second Read when the buffer
 // is larger than the test value.
 func TestOutputReaderRead7(t *testing.T) {
 	r := getOutputReader()
 	testBytes := []byte("testing")
-	r.listener.Listener <- testBytes
+	r.Write(testBytes)
 	buf := make([]byte, len(testBytes)+2)
-	r.Quit()
 	read, err := r.Read(buf)
 	read, err = r.Read(buf)
-	if err != io.EOF {
-		t.Fail()
+	if err == io.EOF {
+		t.Errorf("io.EOF wasn returned as an error.")
 	}
 	if read != 0 {
 		t.Fail()
 	}
+	r.Quit()
 }
 
 func TestOutputRegistryListenSetter(t *testing.T) {
@@ -215,8 +188,12 @@ func TestOutputRegistryInput(t *testing.T) {
 	r := NewOutputRegistry()
 	l := r.AddListener()
 	testbytes := []byte("testing")
-	r.Input <- testbytes
-	recv := <-l.Listener
+	r.Write(testbytes)
+	recv := make([]byte, 7)
+	_, err := l.Read(recv)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 	if !reflect.DeepEqual(recv, testbytes) {
 		t.Fail()
 	}
@@ -227,29 +204,17 @@ func TestOutputRegistryInput2(t *testing.T) {
 	l1 := r.AddListener()
 	l2 := r.AddListener()
 	testbytes := []byte("testing")
-	r.Input <- testbytes
-	var recv1 []byte
-	var recv2 []byte
-	for {
-		select {
-		case recv1 = <-l1.Listener:
-			close(l1.Listener)
-			l1.Listener = nil
-		case recv2 = <-l2.Listener:
-			close(l2.Listener)
-			l2.Listener = nil
-		}
-		if l1.Listener == nil && l2.Listener == nil {
-			break
-		}
-	}
+	r.Write(testbytes)
+	recv1 := make([]byte, 7)
+	recv2 := make([]byte, 7)
+	l1.Read(recv1)
+	l2.Read(recv2)
 	if !reflect.DeepEqual(recv1, testbytes) {
 		t.Fail()
 	}
 	if !reflect.DeepEqual(recv2, testbytes) {
 		t.Fail()
 	}
-
 }
 
 func TestJobWrite(t *testing.T) {
@@ -259,21 +224,10 @@ func TestJobWrite(t *testing.T) {
 	l2 := r.AddListener()
 	testbytes := []byte("testing")
 	r.Write(testbytes)
-	var recv1 []byte
-	var recv2 []byte
-	for {
-		select {
-		case recv1 = <-l1.Listener:
-			close(l1.Listener)
-			l1.Listener = nil
-		case recv2 = <-l2.Listener:
-			close(l2.Listener)
-			l2.Listener = nil
-		}
-		if l1.Listener == nil && l2.Listener == nil {
-			break
-		}
-	}
+	recv1 := make([]byte, 7)
+	recv2 := make([]byte, 7)
+	l1.Read(recv1)
+	l2.Read(recv2)
 	if !reflect.DeepEqual(recv1, testbytes) {
 		t.Fail()
 	}
