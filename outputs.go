@@ -1,101 +1,111 @@
 package main
 
-type registryCommand struct {
-	action registryAction
-	key    string
-	value  interface{}
-	result chan<- interface{}
-}
-
-type registryAction int
-
-const (
-	remove registryAction = iota
-	find
-	set
-	get
-	length
-	quit
-	listkeys
+import (
+	"fmt"
+	"io"
+	"sync"
 )
 
-// Registry maintains a map of UUIDs associated with Job instances.
-type Registry chan registryCommand
+// OutputListener maintains a Listener and Quit channel for data read from
+// a job's stdout/stderr stream.
+type OutputListener struct {
+	Listener chan []byte
+	Quit     chan int
+}
 
-// NewRegistry returns a new instance of Registry.
-func NewRegistry() Registry {
-	r := make(Registry)
+// NewOutputListener returns a new instance of OutputListener.
+func NewOutputListener() *OutputListener {
+	return &OutputListener{
+		Listener: make(chan []byte),
+		Quit:     make(chan int),
+	}
+}
+
+// OutputReader will buffer and allow Read()s from data sent via a
+// OutputListener
+type OutputReader struct {
+	accum       []byte
+	listener    *OutputListener
+	m           *sync.Mutex
+	quitChannel chan int
+	eof         bool
+}
+
+// NewOutputReader will create a new OutputReader with the given
+// OutputListener.
+func NewOutputReader(l *OutputListener) *OutputReader {
+	r := &OutputReader{
+		accum:       make([]byte, 0),
+		listener:    l,
+		m:           &sync.Mutex{},
+		quitChannel: make(chan int),
+		eof:         false,
+	}
 	go r.run()
 	return r
 }
 
-type registryFindResult struct {
-	found  bool
-	result *Job
-}
-
-// run launches a goroutine that can be communicated with by the Registry
-// channel.
-func (r Registry) run() {
-	reg := make(map[string]*Job)
-	for command := range r {
-		switch command.action {
-		case set:
-			reg[command.key] = command.value.(*Job)
-		case get:
-			val, found := reg[command.key]
-			command.result <- registryFindResult{found, val}
-		case length:
-			command.result <- len(reg)
-		case remove:
-			delete(reg, command.key)
-		case listkeys:
-			var retval []string
-			for k := range reg {
-				retval = append(retval, k)
+func (r *OutputReader) run() {
+	for {
+		select {
+		case inBytes := <-r.listener.Listener:
+			r.m.Lock()
+			//fmt.Println(string(inBytes[:]))
+			for _, b := range inBytes {
+				r.accum = append(r.accum, b)
 			}
-			command.result <- retval
-		case quit:
-			close(r)
+			r.m.Unlock()
+		case <-r.listener.Quit: //Quit if the listener tells us to.
+			r.m.Lock()
+			fmt.Println("setting r.eof from a listener.Quit")
+			//r.eof = true
+			r.m.Unlock()
+			break
+		case <-r.quitChannel: //Quit if a caller tells us to.
+			r.m.Lock()
+			fmt.Println("setting r.eof from a r.quitChannle")
+			//r.eof = true
+			r.m.Unlock()
+			break
 		}
 	}
 }
 
-// Register associates 'uuid' with a *Job in the registry.
-func (r Registry) Register(uuid string, s *Job) {
-	r <- registryCommand{action: set, key: uuid, value: s}
+// Reader will do a consuming read from the OutputReader's buffer. This method
+// allows an OutputReader to be substituted for an io.Reader.
+func (r *OutputReader) Read(p []byte) (n int, err error) {
+	r.m.Lock()
+	defer r.m.Unlock()
+	if r.eof && len(r.accum) == 0 {
+		return 0, io.EOF
+	}
+	if len(r.accum) == 0 {
+		return 0, nil
+	}
+	var bytesRead int
+	if len(r.accum) <= len(p) {
+		bytesRead = copy(p, r.accum)
+		r.accum = make([]byte, 0)
+		if r.eof {
+			return bytesRead, io.EOF
+		}
+		return bytesRead, nil
+	}
+	bytesRead = copy(p, r.accum)
+	r.accum = r.accum[bytesRead:]
+	if r.eof && (len(r.accum) <= 0) {
+		return bytesRead, io.EOF
+	}
+	return bytesRead, nil
+
 }
 
-// Get returns the *Job for the given uuid in the registry.
-func (r Registry) Get(uuid string) *Job {
-	reply := make(chan interface{})
-	regCmd := registryCommand{action: get, key: uuid, result: reply}
-	r <- regCmd
-	result := (<-reply).(registryFindResult)
-	return result.result
-}
-
-// HasKey returns true if a job associated with uuid in the registry.
-func (r Registry) HasKey(uuid string) bool {
-	reply := make(chan interface{})
-	regCmd := registryCommand{action: get, key: uuid, result: reply}
-	r <- regCmd
-	result := (<-reply).(registryFindResult)
-	return result.found
-}
-
-// List returns the list of jobs in the registry.
-func (r Registry) List() []string {
-	reply := make(chan interface{})
-	regCmd := registryCommand{action: listkeys, result: reply}
-	r <- regCmd
-	result := (<-reply).([]string)
-	return result
-}
-
-// Delete deletes a *Job from the registry.
-func (r Registry) Delete(uuid string) {
-	r <- registryCommand{action: remove, key: uuid}
+// Quit will tell the goroutine that pushes data into the buffer to quit.
+func (r *OutputReader) Quit() {
+	r.m.Lock()
+	r.eof = true
+	r.m.Unlock()
+	r.quitChannel <- 1
 }
 
 // outputRegistry contains a list of channels that accept []byte's. Each job
