@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"expvar"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -51,7 +50,8 @@ type StartMsg struct {
 
 // IDMsg represents a ID response
 type IDMsg struct {
-	ID string
+	JobID      string
+	CommandIDs []string
 }
 
 // APIHandlers defines handlers for the endpoints and gives them access to a
@@ -90,9 +90,10 @@ func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	jid := h.Executor.Execute(&jobMsg.Commands)
+	jid, cids := h.Executor.Execute(&jobMsg.Commands)
 	returnMsg, err := json.Marshal(&IDMsg{
-		ID: jid,
+		JobID:      jid,
+		CommandIDs: cids,
 	})
 	if err != nil {
 		http.Error(resp, err.Error(), 500)
@@ -135,11 +136,8 @@ func (h *APIHandlers) Attach(resp http.ResponseWriter, r *http.Request) {
 		http.Error(resp, fmt.Sprintf("Job %s not found.", ID), 404)
 		return
 	}
-	job := jobRegistry.Get(ID)
-	reader := job.OutputRegistry.AddListener()
-	defer reader.Quit()
-	defer job.OutputRegistry.RemoveListener(reader)
-	io.Copy(resp, reader)
+	//job := jobRegistry.Get(ID)
+	fmt.Fprintf(resp, ID)
 }
 
 // Kill kills a running job.

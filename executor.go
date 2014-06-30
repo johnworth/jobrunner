@@ -130,23 +130,26 @@ func NewExecutor() *Executor {
 }
 
 // Execute processes the JSONCmds passed in a Runs a job.
-func (e *Executor) Execute(cmds *[]JSONCmd) string {
+func (e *Executor) Execute(cmds *[]JSONCmd) (string, []string) {
+	var commandIDs []string
 	jobID := uuid.New()
 	job := NewJob()
 	job.SetUUID(jobID)
 	e.Registry.Register(jobID, job)
 	log.Printf("Registering job %s.", jobID)
 	for _, c := range *cmds {
+		cid := uuid.New()
 		bash := NewBashCommand()
-		bash.SetUUID(uuid.New())
+		bash.SetUUID(cid)
 		bash.Prepare(c.CommandLine, c.Environment)
 		job.AddCommand(bash)
+		commandIDs = append(commandIDs, cid)
 	}
 	go func(jid string) {
 		job.Run()
 		e.Registry.Delete(jid)
 	}(jobID)
-	return jobID
+	return jobID, commandIDs
 }
 
 // Kill terminates the specified job with extreme prejudice.

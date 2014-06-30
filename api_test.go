@@ -26,10 +26,10 @@ func TestStart(t *testing.T) {
 	if err := dec.Decode(&msg); err != nil {
 		t.Errorf("Failed to decode response body.")
 	}
-	if msg.ID == "" {
+	if msg.JobID == "" {
 		t.Errorf("Response body is missing the ID field.")
 	}
-	if !reflect.DeepEqual(reflect.TypeOf(msg.ID), reflect.TypeOf("")) {
+	if !reflect.DeepEqual(reflect.TypeOf(msg.JobID), reflect.TypeOf("")) {
 		t.Errorf("Response Body is not a string.")
 	}
 }
@@ -79,8 +79,8 @@ func TestList(t *testing.T) {
 		t.Errorf("Failed to decode response body.")
 	}
 	var IDs []string
-	IDs = append(IDs, msg1.ID)
-	IDs = append(IDs, msg2.ID)
+	IDs = append(IDs, msg1.JobID)
+	IDs = append(IDs, msg2.JobID)
 	var listmsg ListResponse
 	listReq, err := http.NewRequest("GET", "http://localhost:8080/", nil)
 	if err != nil {

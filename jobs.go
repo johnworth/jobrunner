@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"log"
 	"os/exec"
 	"sync"
@@ -14,7 +13,7 @@ type JobCommand interface {
 	UUID() string
 	MonitorState()
 	Wait()
-	Start(w io.Writer)
+	Start()
 	Prepare(c string, e map[string]string)
 	Kill()
 }
@@ -28,7 +27,6 @@ type Job struct {
 	currentLock    *sync.RWMutex
 	uuid           string //UUID of the Job
 	uuidLock       *sync.RWMutex
-	OutputRegistry *outputRegistry
 	completed      bool
 	completedLock  *sync.RWMutex
 }
@@ -42,7 +40,6 @@ func NewJob() *Job {
 		currentLock:    &sync.RWMutex{},
 		uuid:           "",
 		uuidLock:       &sync.RWMutex{},
-		OutputRegistry: NewOutputRegistry(),
 		completed:      false,
 		completedLock:  &sync.RWMutex{},
 	}
@@ -109,7 +106,6 @@ func (j *Job) SetCompleted(c bool) {
 func (j *Job) Kill() {
 	cc := *j.currentCommand
 	cc.Kill()
-	j.OutputRegistry.Quit()
 }
 
 // Run fires off a gorouting that iterates through the commands list and runs
@@ -118,7 +114,7 @@ func (j *Job) Kill() {
 func (j *Job) Run() {
 	for _, c := range j.Commands() {
 		j.SetCurrent(c)
-		c.Start(j.OutputRegistry)
+		c.Start()
 		c.MonitorState()
 		c.Wait()
 	}
@@ -306,7 +302,7 @@ func (j *BashCommand) Wait() {
 // Start gets the command running. The job will not begin until a command is set,
 // the environment is set, and the begin channel receives a message. The best
 // way to do all that is with the Prepare() method.
-func (j *BashCommand) Start(w io.Writer) {
+func (j *BashCommand) Start() {
 	shouldStart := false
 	var cmdString string
 	var environment map[string]string
@@ -325,8 +321,6 @@ func (j *BashCommand) Start(w io.Writer) {
 	}
 	cmd = exec.Command("bash", "-c", cmdString)
 	cmd.Env = formatEnv(environment)
-	cmd.Stdout = w
-	cmd.Stderr = w
 	j.SetCmdPtr(cmd)
 	err := cmd.Start()
 	j.began <- 1
