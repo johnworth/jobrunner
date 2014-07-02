@@ -1,6 +1,4 @@
-####GOPATH=$(CURDIR)/_vendor:$GOPATH
 GOPATH=$(CURDIR)/_vendor:$(realpath ../../../../):$GOPATH
-
 
 all:
 	go build .
