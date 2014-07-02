@@ -1,6 +1,8 @@
 package jobs
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"reflect"
 	"testing"
@@ -65,7 +67,8 @@ func TestSetCmdPtr(t *testing.T) {
 
 func TestUUID(t *testing.T) {
 	j := NewBashCommand()
-	if j.UUID() != "" {
+	fmt.Println(j.UUID())
+	if j.UUID() == "" {
 		t.Fail()
 	}
 }
@@ -81,6 +84,8 @@ func TestSetUUID(t *testing.T) {
 
 func TestPrepare(t *testing.T) {
 	j := NewBashCommand()
+	j.SetWorkingDir("/tmp/jobrunnerTestPrepare")
+	defer os.RemoveAll("/tmp/jobrunnerTestPrepare")
 	var c string
 	var e map[string]string
 	go func() {
@@ -89,7 +94,10 @@ func TestPrepare(t *testing.T) {
 		<-j.begin
 		j.began <- 1
 	}()
-	j.Prepare("foobar", map[string]string{"foo": "bar"})
+	err := j.Prepare("foobar", map[string]string{"foo": "bar"})
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 	<-j.began
 	if c != "foobar" {
 		t.Errorf("The command was not set to %s.", "foobar")
@@ -102,6 +110,8 @@ func TestPrepare(t *testing.T) {
 func TestJobStart(t *testing.T) {
 	j := NewJob()
 	b := NewBashCommand()
+	b.SetWorkingDir("/tmp/testJobStart")
+	defer os.RemoveAll("/tmp/testJobStart")
 	j.AddCommand(b)
 	b.Prepare("echo foo", map[string]string{})
 	b.Start()
@@ -114,6 +124,8 @@ func TestJobStart(t *testing.T) {
 func TestMonitorState1(t *testing.T) {
 	j := NewJob()
 	b := NewBashCommand()
+	b.SetWorkingDir("/tmp/testMonitorState")
+	defer os.RemoveAll("/tmp/testMonitorState")
 	j.AddCommand(b)
 	b.Prepare("while true; do echo 1; done", map[string]string{})
 	b.Start()
@@ -127,15 +139,17 @@ func TestMonitorState1(t *testing.T) {
 func TestJobWait(t *testing.T) {
 	j := NewJob()
 	b := NewBashCommand()
+	b.SetWorkingDir("/tmp/testJobWait")
+	defer os.RemoveAll("/tmp/testJobWait")
 	j.AddCommand(b)
 	b.Prepare("echo true", map[string]string{})
 	b.Start()
 	b.MonitorState()
 	b.Wait()
 	if b.Killed() {
-		t.Fail()
+		t.Errorf("Command was Killed")
 	}
 	if b.ExitCode() == -9000 {
-		t.Fail()
+		t.Errorf("Exit code wasn't -9000")
 	}
 }

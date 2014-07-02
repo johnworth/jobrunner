@@ -3,9 +3,15 @@ package jobs
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path"
 	"sync"
 	"syscall"
+
+	"github.com/johnworth/jobrunner/config"
+
+	"code.google.com/p/go-uuid/uuid"
 )
 
 // exitCode returns the integer exit code of a command. Start() and Wait()
@@ -30,7 +36,7 @@ type JobCommand interface {
 	MonitorState()
 	Wait()
 	Start()
-	Prepare(c string, e map[string]string)
+	Prepare(c string, e map[string]string) error
 	Kill()
 }
 
@@ -45,20 +51,47 @@ type Job struct {
 	uuidLock       *sync.RWMutex
 	completed      bool
 	completedLock  *sync.RWMutex
+	workingDir     string
+	workingDirLock *sync.RWMutex
 }
 
 // NewJob returns a pointer to a new instance of Job.
 func NewJob() *Job {
+	newUUID := uuid.New()
 	return &Job{
 		commands:       make([]JobCommand, 0),
 		commandsLock:   &sync.RWMutex{},
 		currentCommand: nil,
 		currentLock:    &sync.RWMutex{},
-		uuid:           "",
+		uuid:           newUUID,
 		uuidLock:       &sync.RWMutex{},
 		completed:      false,
 		completedLock:  &sync.RWMutex{},
+		workingDir:     "",
+		workingDirLock: &sync.RWMutex{},
 	}
+}
+
+//Prepare performs operations prior to a Job's execution that it needs to succeed.
+//Right now that consists of creating the working directory.
+func (j *Job) Prepare() error {
+	cfg := config.Get()
+	err := os.Mkdir(path.Join(cfg.BaseDir, j.UUID()), 0755)
+	return err
+}
+
+//WorkingDir returns the working directory set for a Job.
+func (j *Job) WorkingDir() string {
+	j.workingDirLock.RLock()
+	defer j.workingDirLock.RUnlock()
+	return j.workingDir
+}
+
+//SetWorkingDir sets the working directory for a Job.
+func (j *Job) SetWorkingDir(w string) {
+	j.workingDirLock.Lock()
+	defer j.workingDirLock.Unlock()
+	j.workingDir = w
 }
 
 // Commands returns a copy of the JobCommand list.
@@ -140,47 +173,66 @@ func (j *Job) Run() {
 // BashCommand contains all of the state associated with a command run through
 // bash.
 type BashCommand struct {
-	command      chan string
-	done         chan error
-	abort        chan int
-	environment  chan map[string]string
-	begin        chan int
-	began        chan int
-	kill         chan int
-	killed       bool
-	killedLock   *sync.Mutex
-	Output       chan []byte
-	exitCode     int
-	exitCodeLock *sync.Mutex
-	completed    chan int
-	cmdPtr       *exec.Cmd
-	cmdPtrLock   *sync.Mutex
-	uuid         string
-	uuidLock     *sync.Mutex
+	command        chan string
+	done           chan error
+	abort          chan int
+	environment    chan map[string]string
+	begin          chan int
+	began          chan int
+	kill           chan int
+	killed         bool
+	killedLock     *sync.Mutex
+	Output         chan []byte
+	exitCode       int
+	exitCodeLock   *sync.Mutex
+	completed      chan int
+	cmdPtr         *exec.Cmd
+	cmdPtrLock     *sync.Mutex
+	uuid           string
+	uuidLock       *sync.Mutex
+	workingDir     string
+	workingDirLock *sync.Mutex
 }
 
 // NewBashCommand returns a pointer to a new instance of BashCommand.
 func NewBashCommand() *BashCommand {
+	newUUID := uuid.New()
 	j := &BashCommand{
-		command:      make(chan string),
-		done:         make(chan error),
-		abort:        make(chan int),
-		environment:  make(chan map[string]string),
-		begin:        make(chan int),
-		began:        make(chan int),
-		kill:         make(chan int),
-		killed:       false,
-		killedLock:   &sync.Mutex{},
-		Output:       make(chan []byte),
-		exitCode:     -9000,
-		exitCodeLock: &sync.Mutex{},
-		completed:    make(chan int),
-		cmdPtr:       nil,
-		cmdPtrLock:   &sync.Mutex{},
-		uuid:         "",
-		uuidLock:     &sync.Mutex{},
+		command:        make(chan string),
+		done:           make(chan error),
+		abort:          make(chan int),
+		environment:    make(chan map[string]string),
+		begin:          make(chan int),
+		began:          make(chan int),
+		kill:           make(chan int),
+		killed:         false,
+		killedLock:     &sync.Mutex{},
+		Output:         make(chan []byte),
+		exitCode:       -9000,
+		exitCodeLock:   &sync.Mutex{},
+		completed:      make(chan int),
+		cmdPtr:         nil,
+		cmdPtrLock:     &sync.Mutex{},
+		uuid:           newUUID,
+		uuidLock:       &sync.Mutex{},
+		workingDir:     "",
+		workingDirLock: &sync.Mutex{},
 	}
 	return j
+}
+
+// SetWorkingDir sets the working directory for a BashCommand. Should be threadsafe.
+func (j *BashCommand) SetWorkingDir(w string) {
+	j.workingDirLock.Lock()
+	defer j.workingDirLock.Unlock()
+	j.workingDir = w
+}
+
+// WorkingDir returns the working directory for a BashCommand. Should be threadsafe.
+func (j *BashCommand) WorkingDir() string {
+	j.workingDirLock.Lock()
+	defer j.workingDirLock.Unlock()
+	return j.workingDir
 }
 
 // SetKilled sets the killed field for a BashCommand. Should be threadsafe.
@@ -351,13 +403,18 @@ func (j *BashCommand) Start() {
 // Prepare allows the caller to set the command and environment for the job.
 // Call this before or after Start(). It doesn't matter when, but it must be
 // called.
-func (j *BashCommand) Prepare(command string, environment map[string]string) {
+func (j *BashCommand) Prepare(command string, environment map[string]string) error {
+	err := os.MkdirAll(j.WorkingDir(), 0755)
+	if err != nil {
+		return err
+	}
 	go func() {
 		j.command <- command
 		j.environment <- environment
 		j.begin <- 1
 		<-j.began
 	}()
+	return err
 }
 
 // Kill kills a command.

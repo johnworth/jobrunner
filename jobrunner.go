@@ -10,7 +10,10 @@ import (
 
 func main() {
 	fmt.Println("Starting jobrunner.")
-	conf := config.Configure()
-	server := api.NewAPIHandlers().NewServer(conf)
+	err := config.Configure()
+	if err != nil {
+		log.Fatal(err)
+	}
+	server := api.NewAPIHandlers().NewServer()
 	log.Fatal(server.ListenAndServe())
 }

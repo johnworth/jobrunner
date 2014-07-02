@@ -3,18 +3,24 @@ package executor
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
+	"github.com/johnworth/jobrunner/config"
 	"github.com/johnworth/jobrunner/jobs"
 
 	"testing"
 	"time"
 )
 
+func init() {
+	config.Configure()
+}
+
 func TestRegistryRegister(t *testing.T) {
 	j := jobs.NewJob()
 	r := NewRegistry()
 	j.SetUUID("testing")
-	r.Register("testing", j)
+	r.Register(j)
 	foundjob := r.HasKey("testing")
 	if !foundjob {
 		t.Fail()
@@ -24,7 +30,8 @@ func TestRegistryRegister(t *testing.T) {
 func TestRegistryGet(t *testing.T) {
 	r := NewRegistry()
 	s := jobs.NewJob()
-	r.Register("testing", s)
+	s.SetUUID("testing")
+	r.Register(s)
 	get := r.Get("testing")
 	if get != s {
 		t.Fail()
@@ -34,7 +41,8 @@ func TestRegistryGet(t *testing.T) {
 func TestRegistryHasKey(t *testing.T) {
 	r := NewRegistry()
 	s := jobs.NewJob()
-	r.Register("testing", s)
+	s.SetUUID("testing")
+	r.Register(s)
 	if !r.HasKey("testing") {
 		t.Fail()
 	}
@@ -46,8 +54,9 @@ func TestRegistryHasKey(t *testing.T) {
 func TestRegistryDelete(t *testing.T) {
 	r := NewRegistry()
 	s := jobs.NewJob()
-	r.Register("testing", s)
-	r.Delete("testing")
+	s.SetUUID("testing")
+	r.Register(s)
+	r.Delete(s)
 	if r.HasKey("testing") {
 		t.Fail()
 	}
@@ -56,9 +65,14 @@ func TestRegistryDelete(t *testing.T) {
 func TestRegistryList(t *testing.T) {
 	r := NewRegistry()
 	s := jobs.NewJob()
-	r.Register("testing", s)
-	r.Register("testing2", s)
-	r.Register("testing3", s)
+	s.SetUUID("testing")
+	s1 := jobs.NewJob()
+	s1.SetUUID("testing2")
+	s2 := jobs.NewJob()
+	s2.SetUUID("testing3")
+	r.Register(s)
+	r.Register(s1)
+	r.Register(s2)
 	list := r.List()
 	found1 := false
 	found2 := false
@@ -86,7 +100,12 @@ func TestExecutorExecute(t *testing.T) {
 	json.Unmarshal([]byte(jobsString), &start)
 	e := NewExecutor()
 	fmt.Println(len(start.Commands))
-	id, commandIDs := e.Execute(&start.Commands)
+	id, commandIDs, err := e.Execute(&start)
+	job := e.Registry.Get(id)
+	defer os.RemoveAll(job.WorkingDir())
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 	if id == "" {
 		t.Errorf("A Job ID was not returned.")
 	}
@@ -100,8 +119,12 @@ func TestExecutorKill(t *testing.T) {
 	jobString := "{\"Commands\":[{\"CommandLine\":\"while true; do echo foo; done\", \"Environment\":{}}]}"
 	json.Unmarshal([]byte(jobString), &start)
 	e := NewExecutor()
-	jobid, _ := e.Execute(&start.Commands)
+	jobid, _, err := e.Execute(&start)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 	s := e.Registry.Get(jobid)
+	defer os.RemoveAll(s.WorkingDir())
 	coord := make(chan int)
 	go func() {
 		for {
@@ -112,7 +135,7 @@ func TestExecutorKill(t *testing.T) {
 		}
 		coord <- 1
 	}()
-	e.Kill(jobid)
+	e.Kill(s)
 	<-coord
 	cmds := s.Commands()
 	lastJob := cmds[len(cmds)-1].(*jobs.BashCommand) //type JobCommand

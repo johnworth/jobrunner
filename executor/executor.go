@@ -1,11 +1,10 @@
 package executor
 
 import (
-	"log"
+	"path"
 
+	"github.com/johnworth/jobrunner/config"
 	"github.com/johnworth/jobrunner/jobs"
-
-	"code.google.com/p/go-uuid/uuid"
 )
 
 // JSONCmd represents a single command for a job as sent by a client.
@@ -17,7 +16,8 @@ type JSONCmd struct {
 
 // StartMsg represents a job start request
 type StartMsg struct {
-	Commands []JSONCmd
+	Commands   []JSONCmd
+	WorkingDir string
 }
 
 // IDMsg represents a ID response
@@ -88,8 +88,9 @@ func (r Registry) run() {
 }
 
 // Register associates 'uuid' with a *Job in the registry.
-func (r Registry) Register(uuid string, s *jobs.Job) {
-	r <- registryCommand{action: set, key: uuid, value: s}
+func (r Registry) Register(j *jobs.Job) {
+	uuid := j.UUID()
+	r <- registryCommand{action: set, key: uuid, value: j}
 }
 
 // Get returns the *Job for the given uuid in the registry.
@@ -120,7 +121,8 @@ func (r Registry) List() []string {
 }
 
 // Delete deletes a *Job from the registry.
-func (r Registry) Delete(uuid string) {
+func (r Registry) Delete(j *jobs.Job) {
+	uuid := j.UUID()
 	r <- registryCommand{action: remove, key: uuid}
 }
 
@@ -141,33 +143,53 @@ func NewExecutor() *Executor {
 }
 
 // Execute processes the JSONCmds passed in a Runs a job.
-func (e *Executor) Execute(cmds *[]JSONCmd) (string, []string) {
+func (e *Executor) Execute(msg *StartMsg) (string, []string, error) {
+	cfg := config.Get()
 	var commandIDs []string
-	jobID := uuid.New()
 	job := jobs.NewJob()
-	job.SetUUID(jobID)
-	e.Registry.Register(jobID, job)
-	log.Printf("Registering job %s.", jobID)
-	for _, c := range *cmds {
-		cid := uuid.New()
-		bash := jobs.NewBashCommand()
-		bash.SetUUID(cid)
-		bash.Prepare(c.CommandLine, c.Environment)
-		job.AddCommand(bash)
-		commandIDs = append(commandIDs, cid)
+
+	//Set the working directory for the job.
+	var workingDir string
+	if msg.WorkingDir == "" {
+		//default working directory
+		workingDir = path.Join(cfg.BaseDir, job.UUID())
+	} else {
+		//user specified working directory
+		workingDir = path.Join(cfg.BaseDir, msg.WorkingDir)
 	}
-	go func(jid string) {
+	job.SetWorkingDir(workingDir)
+
+	//Make sure the job is prepared. In other words, create the working dir.
+	err := job.Prepare()
+	if err != nil {
+		return "", nil, err
+	}
+
+	//Add commands to the job
+	for _, c := range msg.Commands {
+		bash := jobs.NewBashCommand()
+		if c.WorkingDir != "" {
+			bash.SetWorkingDir(path.Join(workingDir, c.WorkingDir))
+		} else {
+			bash.SetWorkingDir(workingDir)
+		}
+		err = bash.Prepare(c.CommandLine, c.Environment)
+		if err != nil {
+			return "", nil, err
+		}
+		job.AddCommand(bash)
+		commandIDs = append(commandIDs, bash.UUID())
+	}
+	e.Registry.Register(job)
+	go func(job *jobs.Job) {
 		job.Run()
-		e.Registry.Delete(jid)
-	}(jobID)
-	return jobID, commandIDs
+		e.Registry.Delete(job)
+	}(job)
+	return job.UUID(), commandIDs, err
 }
 
 // Kill terminates the specified job with extreme prejudice.
-func (e *Executor) Kill(uuid string) {
-	if e.Registry.HasKey(uuid) {
-		job := e.Registry.Get(uuid)
-		job.Kill()
-		e.Registry.Delete(uuid)
-	}
+func (e *Executor) Kill(job *jobs.Job) {
+	job.Kill()
+	e.Registry.Delete(job)
 }

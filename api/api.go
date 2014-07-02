@@ -74,7 +74,11 @@ func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	jid, cids := h.Executor.Execute(&jobMsg.Commands)
+	jid, cids, err := h.Executor.Execute(&jobMsg)
+	if err != nil {
+		http.Error(resp, err.Error(), 500)
+		return
+	}
 	returnMsg, err := json.Marshal(&executor.IDMsg{
 		JobID:      jid,
 		CommandIDs: cids,
@@ -128,7 +132,10 @@ func (h *APIHandlers) Attach(resp http.ResponseWriter, r *http.Request) {
 func (h *APIHandlers) Kill(resp http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	ID := vars["ID"]
-	h.Executor.Kill(ID)
+	if h.Executor.Registry.HasKey(ID) {
+		job := h.Executor.Registry.Get(ID)
+		h.Executor.Kill(job)
+	}
 }
 
 // SetupRouter uses Gorilla's mux project to set up a router and returns it.
@@ -143,7 +150,8 @@ func (h *APIHandlers) SetupRouter() *mux.Router {
 }
 
 // NewServer calls setupRouter(), constructs a server and fires it up.
-func (h *APIHandlers) NewServer(conf *config.Config) *http.Server {
+func (h *APIHandlers) NewServer() *http.Server {
+	conf := config.Get()
 	m := h.SetupRouter()
 	http.Handle("/", m)
 	s := &http.Server{
