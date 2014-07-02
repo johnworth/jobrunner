@@ -1,10 +1,26 @@
-package main
+package jobs
 
 import (
+	"fmt"
 	"log"
 	"os/exec"
 	"sync"
+	"syscall"
 )
+
+// exitCode returns the integer exit code of a command. Start() and Wait()
+// should have already been called on the Command.
+func exitCode(cmd *exec.Cmd) int {
+	return cmd.ProcessState.Sys().(syscall.WaitStatus).ExitStatus()
+}
+
+func formatEnv(env map[string]string) []string {
+	output := make([]string, 1)
+	for key, val := range env {
+		output = append(output, fmt.Sprintf("%s=%s", key, val))
+	}
+	return output
+}
 
 // JobCommand is an interface for any commands that can be executed as part of
 // a job.

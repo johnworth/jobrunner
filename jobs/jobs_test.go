@@ -1,4 +1,4 @@
-package main
+package jobs
 
 import (
 	"os/exec"
@@ -7,6 +7,15 @@ import (
 
 	"code.google.com/p/go-uuid/uuid"
 )
+
+func TestExitCode(t *testing.T) {
+	cmd := exec.Command("echo", "foo")
+	cmd.Start()
+	cmd.Wait()
+	if exitCode(cmd) != 0 {
+		t.Fail()
+	}
+}
 
 func TestJobKilled(t *testing.T) {
 	j := NewBashCommand()

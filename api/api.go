@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"encoding/json"
@@ -10,6 +10,8 @@ import (
 	"runtime"
 
 	"github.com/gorilla/mux"
+	"github.com/johnworth/jobrunner/config"
+	"github.com/johnworth/jobrunner/executor"
 )
 
 func addrsAsStrings() interface{} {
@@ -36,42 +38,24 @@ func init() {
 	expvar.Publish("addrs", expvar.Func(addrsAsStrings))
 }
 
-// JSONCmd represents a single command for a job as sent by a client.
-type JSONCmd struct {
-	CommandLine string
-	Environment map[string]string
-	WorkingDir  string
-}
-
-// StartMsg represents a job start request
-type StartMsg struct {
-	Commands []JSONCmd
-}
-
-// IDMsg represents a ID response
-type IDMsg struct {
-	JobID      string
-	CommandIDs []string
-}
-
 // APIHandlers defines handlers for the endpoints and gives them access to a
 // Executor.
 type APIHandlers struct {
-	Executor *Executor
+	Executor *executor.Executor
 }
 
 // NewAPIHandlers constructs a new instance of APIHandlers and returns a pointer
 // to it.
 func NewAPIHandlers() *APIHandlers {
 	return &APIHandlers{
-		Executor: NewExecutor(),
+		Executor: executor.NewExecutor(),
 	}
 }
 
 //Start starts a job and returns a job ID.
 func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
-	var jobMsg StartMsg
+	var jobMsg executor.StartMsg
 	if err := dec.Decode(&jobMsg); err != nil {
 		http.Error(resp, err.Error(), 500)
 		return
@@ -91,7 +75,7 @@ func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 		}
 	}
 	jid, cids := h.Executor.Execute(&jobMsg.Commands)
-	returnMsg, err := json.Marshal(&IDMsg{
+	returnMsg, err := json.Marshal(&executor.IDMsg{
 		JobID:      jid,
 		CommandIDs: cids,
 	})
@@ -159,7 +143,7 @@ func (h *APIHandlers) SetupRouter() *mux.Router {
 }
 
 // NewServer calls setupRouter(), constructs a server and fires it up.
-func (h *APIHandlers) NewServer(conf *Config) *http.Server {
+func (h *APIHandlers) NewServer(conf *config.Config) *http.Server {
 	m := h.SetupRouter()
 	http.Handle("/", m)
 	s := &http.Server{

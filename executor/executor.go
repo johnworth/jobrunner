@@ -1,13 +1,30 @@
-package main
+package executor
 
 import (
-	"fmt"
 	"log"
-	"os/exec"
-	"syscall"
+
+	"github.com/johnworth/jobrunner/jobs"
 
 	"code.google.com/p/go-uuid/uuid"
 )
+
+// JSONCmd represents a single command for a job as sent by a client.
+type JSONCmd struct {
+	CommandLine string
+	Environment map[string]string
+	WorkingDir  string
+}
+
+// StartMsg represents a job start request
+type StartMsg struct {
+	Commands []JSONCmd
+}
+
+// IDMsg represents a ID response
+type IDMsg struct {
+	JobID      string
+	CommandIDs []string
+}
 
 type registryCommand struct {
 	action registryAction
@@ -40,17 +57,17 @@ func NewRegistry() Registry {
 
 type registryFindResult struct {
 	found  bool
-	result *Job
+	result *jobs.Job
 }
 
 // run launches a goroutine that can be communicated with by the Registry
 // channel.
 func (r Registry) run() {
-	reg := make(map[string]*Job)
+	reg := make(map[string]*jobs.Job)
 	for command := range r {
 		switch command.action {
 		case set:
-			reg[command.key] = command.value.(*Job)
+			reg[command.key] = command.value.(*jobs.Job)
 		case get:
 			val, found := reg[command.key]
 			command.result <- registryFindResult{found, val}
@@ -71,12 +88,12 @@ func (r Registry) run() {
 }
 
 // Register associates 'uuid' with a *Job in the registry.
-func (r Registry) Register(uuid string, s *Job) {
+func (r Registry) Register(uuid string, s *jobs.Job) {
 	r <- registryCommand{action: set, key: uuid, value: s}
 }
 
 // Get returns the *Job for the given uuid in the registry.
-func (r Registry) Get(uuid string) *Job {
+func (r Registry) Get(uuid string) *jobs.Job {
 	reply := make(chan interface{})
 	regCmd := registryCommand{action: get, key: uuid, result: reply}
 	r <- regCmd
@@ -107,12 +124,6 @@ func (r Registry) Delete(uuid string) {
 	r <- registryCommand{action: remove, key: uuid}
 }
 
-// exitCode returns the integer exit code of a command. Start() and Wait()
-// should have already been called on the Command.
-func exitCode(cmd *exec.Cmd) int {
-	return cmd.ProcessState.Sys().(syscall.WaitStatus).ExitStatus()
-}
-
 // Executor maintains a reference to a Registry and is able to launch
 // jobs. There should only be one instance of Executor per instance of
 // jobrunner, but there isn't anything to prevent you from creating more than
@@ -133,13 +144,13 @@ func NewExecutor() *Executor {
 func (e *Executor) Execute(cmds *[]JSONCmd) (string, []string) {
 	var commandIDs []string
 	jobID := uuid.New()
-	job := NewJob()
+	job := jobs.NewJob()
 	job.SetUUID(jobID)
 	e.Registry.Register(jobID, job)
 	log.Printf("Registering job %s.", jobID)
 	for _, c := range *cmds {
 		cid := uuid.New()
-		bash := NewBashCommand()
+		bash := jobs.NewBashCommand()
 		bash.SetUUID(cid)
 		bash.Prepare(c.CommandLine, c.Environment)
 		job.AddCommand(bash)
@@ -159,12 +170,4 @@ func (e *Executor) Kill(uuid string) {
 		job.Kill()
 		e.Registry.Delete(uuid)
 	}
-}
-
-func formatEnv(env map[string]string) []string {
-	output := make([]string, 1)
-	for key, val := range env {
-		output = append(output, fmt.Sprintf("%s=%s", key, val))
-	}
-	return output
 }

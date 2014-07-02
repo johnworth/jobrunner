@@ -1,25 +1,17 @@
-package main
+package executor
 
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
+
+	"github.com/johnworth/jobrunner/jobs"
 
 	"testing"
 	"time"
 )
 
-func TestExitCode(t *testing.T) {
-	cmd := exec.Command("echo", "foo")
-	cmd.Start()
-	cmd.Wait()
-	if exitCode(cmd) != 0 {
-		t.Fail()
-	}
-}
-
 func TestRegistryRegister(t *testing.T) {
-	j := NewJob()
+	j := jobs.NewJob()
 	r := NewRegistry()
 	j.SetUUID("testing")
 	r.Register("testing", j)
@@ -31,7 +23,7 @@ func TestRegistryRegister(t *testing.T) {
 
 func TestRegistryGet(t *testing.T) {
 	r := NewRegistry()
-	s := NewJob()
+	s := jobs.NewJob()
 	r.Register("testing", s)
 	get := r.Get("testing")
 	if get != s {
@@ -41,7 +33,7 @@ func TestRegistryGet(t *testing.T) {
 
 func TestRegistryHasKey(t *testing.T) {
 	r := NewRegistry()
-	s := NewJob()
+	s := jobs.NewJob()
 	r.Register("testing", s)
 	if !r.HasKey("testing") {
 		t.Fail()
@@ -53,7 +45,7 @@ func TestRegistryHasKey(t *testing.T) {
 
 func TestRegistryDelete(t *testing.T) {
 	r := NewRegistry()
-	s := NewJob()
+	s := jobs.NewJob()
 	r.Register("testing", s)
 	r.Delete("testing")
 	if r.HasKey("testing") {
@@ -63,7 +55,7 @@ func TestRegistryDelete(t *testing.T) {
 
 func TestRegistryList(t *testing.T) {
 	r := NewRegistry()
-	s := NewJob()
+	s := jobs.NewJob()
 	r.Register("testing", s)
 	r.Register("testing2", s)
 	r.Register("testing3", s)
@@ -123,7 +115,7 @@ func TestExecutorKill(t *testing.T) {
 	e.Kill(jobid)
 	<-coord
 	cmds := s.Commands()
-	lastJob := cmds[len(cmds)-1].(*BashCommand) //type JobCommand
+	lastJob := cmds[len(cmds)-1].(*jobs.BashCommand) //type JobCommand
 	exit := lastJob.ExitCode()
 	if exit != -100 {
 		t.Errorf("Exit code for the kill command wasn't -100.")
