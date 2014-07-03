@@ -146,7 +146,4 @@ func TestExecutorKill(t *testing.T) {
 	if !lastJob.Killed() {
 		t.Errorf("The Job.Killed field wasn't false.")
 	}
-	// if e.Registry.HasKey(jobid) {
-	// 	t.Error("The registry still has a reference to the jobID")
-	// }
 }

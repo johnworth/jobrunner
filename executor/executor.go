@@ -183,10 +183,6 @@ func (e *Executor) Execute(msg *StartMsg) (string, []string, error) {
 	}
 	e.Registry.Register(job)
 	go job.Run()
-	// go func(job *jobs.Job) {
-	// 	job.Run()
-	// 	e.Registry.Delete(job)
-	// }(job)
 	return job.UUID(), commandIDs, err
 }
 
