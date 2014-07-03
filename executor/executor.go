@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"fmt"
 	"path"
 
 	"github.com/johnworth/jobrunner/config"
@@ -181,15 +182,28 @@ func (e *Executor) Execute(msg *StartMsg) (string, []string, error) {
 		commandIDs = append(commandIDs, bash.UUID())
 	}
 	e.Registry.Register(job)
-	go func(job *jobs.Job) {
-		job.Run()
-		e.Registry.Delete(job)
-	}(job)
+	go job.Run()
+	// go func(job *jobs.Job) {
+	// 	job.Run()
+	// 	e.Registry.Delete(job)
+	// }(job)
 	return job.UUID(), commandIDs, err
 }
 
 // Kill terminates the specified job with extreme prejudice.
 func (e *Executor) Kill(job *jobs.Job) {
 	job.Kill()
-	e.Registry.Delete(job)
+}
+
+// Clean tells executor to clean up the job. The job does not have to be running
+// and it might actually be better if it's done before you clean it up.
+func (e *Executor) Clean(job *jobs.Job) error {
+	if !job.Completed() {
+		return fmt.Errorf("Job %s must be completed or killed before it can be cleaned.", job.UUID())
+	}
+	if e.Registry.HasKey(job.UUID()) {
+		e.Registry.Delete(job)
+	}
+	err := job.Clean()
+	return err
 }

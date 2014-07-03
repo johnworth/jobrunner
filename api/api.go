@@ -134,8 +134,22 @@ func (h *APIHandlers) Kill(resp http.ResponseWriter, r *http.Request) {
 	ID := vars["ID"]
 	if h.Executor.Registry.HasKey(ID) {
 		job := h.Executor.Registry.Get(ID)
-		h.Executor.Kill(job)
+		if !job.Completed() {
+			h.Executor.Kill(job)
+		}
 	}
+}
+
+//Clean triggers a clean up of disk resources used by the job.
+func (h *APIHandlers) Clean(resp http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	ID := vars["ID"]
+	if !h.Executor.Registry.HasKey(ID) {
+		http.Error(resp, fmt.Sprintf("Job %s not found", ID), 404)
+		return
+	}
+	job := h.Executor.Registry.Get(ID)
+	h.Executor.Clean(job)
 }
 
 // SetupRouter uses Gorilla's mux project to set up a router and returns it.
@@ -144,7 +158,7 @@ func (h *APIHandlers) SetupRouter() *mux.Router {
 	r.HandleFunc("/{ID}", h.GetInfo).Methods("GET")
 	r.HandleFunc("/", h.Start).Methods("POST")
 	r.HandleFunc("/", h.List).Methods("GET")
-	r.HandleFunc("/{ID}/attach", h.Attach).Methods("GET")
+	r.HandleFunc("/{ID}/clean", h.Clean).Methods("POST")
 	r.HandleFunc("/{ID}", h.Kill).Methods("DELETE")
 	return r
 }

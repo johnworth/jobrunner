@@ -157,6 +157,13 @@ func (j *Job) Kill() {
 	cc.Kill()
 }
 
+// Clean tells the job to delete its working directory. You should probably call
+// Kill() first, otherwise bad things may happen.
+func (j *Job) Clean() error {
+	err := os.RemoveAll(j.WorkingDir())
+	return err
+}
+
 // Run fires off a gorouting that iterates through the commands list and runs
 // them one after the other. Prepare() should have been called on each command
 // before Run() is called.
