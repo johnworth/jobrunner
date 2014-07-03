@@ -77,7 +77,10 @@ func (r Registry) run() {
 		case remove:
 			delete(reg, command.key)
 		case listkeys:
-			var retval []string
+			//golint shows a warning about this, but it's wrong for what we need.
+			//if you do 'var retval []string' the empty list shows up as null in
+			//the listing endpoint JSON. if you do this, you get an empty list.
+			retval := make([]string, 0)
 			for k := range reg {
 				retval = append(retval, k)
 			}
