@@ -45,10 +45,7 @@ func TestFileInfoToEntry(t *testing.T) {
 	if err != nil {
 		t.Errorf(err.Error())
 	}
-	srcEntry, err := FileInfoToEntry(wd, srcInfo)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
+	srcEntry := FileInfoToEntry(wd, srcInfo)
 	if srcEntry.Path != srcPath {
 		t.Errorf("%s does not match %s", srcEntry.Path, srcPath)
 	}
@@ -58,8 +55,8 @@ func TestFileInfoToEntry(t *testing.T) {
 	if srcEntry.Type == "Folder" {
 		t.Errorf("Type is set to 'Folder'")
 	}
-	if srcEntry.Mode != "-rw-r--r--" {
-		t.Errorf("Permissions were not set to -rw-r--r--")
+	if srcEntry.Mode != 0644 {
+		t.Errorf("Permissions were not set to 0644")
 	}
 }
 

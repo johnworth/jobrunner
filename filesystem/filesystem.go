@@ -2,7 +2,6 @@ package filesystem
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path"
 )
@@ -19,11 +18,11 @@ func IsDir(file *os.File) (bool, error) {
 //DirectoryEntry is an entry for a directory listing. It's meant to be easy to
 //turn into JSON.
 type DirectoryEntry struct {
-	Path         string //Path to the file relative to the working directory.
-	Mode         string //Permissions
-	DateModified string //Marshalled version of a Date.
-	Size         int64  //The file size in bytes.
-	Type         string //Either "File" or "Folder"
+	Path         string      //Path to the file relative to the working directory.
+	Mode         os.FileMode //Permissions
+	DateModified int64       //Marshalled version of a Date.
+	Size         int64       //The file size in bytes.
+	Type         string      //Either "File" or "Folder"
 }
 
 //DirectoryListing contains all of the objects returned in a directory.
@@ -39,13 +38,10 @@ func NewDirectoryListing() *DirectoryListing {
 }
 
 //FileInfoToEntry transforms a FileInfo object into a DirectoryEntry.
-func FileInfoToEntry(dir string, info os.FileInfo) (*DirectoryEntry, error) {
+func FileInfoToEntry(dir string, info os.FileInfo) *DirectoryEntry {
 	path := path.Join(dir, info.Name())
-	mode := info.Mode().String()
-	date, err := info.ModTime().MarshalJSON()
-	if err != nil {
-		return nil, err
-	}
+	mode := info.Mode()
+	date := info.ModTime().Unix()
 	size := info.Size()
 	var entrytype string
 	if info.IsDir() {
@@ -56,11 +52,11 @@ func FileInfoToEntry(dir string, info os.FileInfo) (*DirectoryEntry, error) {
 	entry := &DirectoryEntry{
 		Path:         path,
 		Mode:         mode,
-		DateModified: string(date[:]),
+		DateModified: date,
 		Size:         size,
 		Type:         entrytype,
 	}
-	return entry, err
+	return entry
 }
 
 //ListDir returns a filled in instance of DirectoryListing based on the contents
@@ -83,11 +79,7 @@ func ListDir(base string) (*DirectoryListing, error) {
 	}
 	listing := NewDirectoryListing()
 	for _, info := range infoResults {
-		entry, err := FileInfoToEntry(base, info)
-		if err != nil {
-			log.Println(err.Error())
-			continue
-		}
+		entry := FileInfoToEntry(base, info)
 		listing.Listing = append(listing.Listing, entry)
 	}
 	return listing, err
