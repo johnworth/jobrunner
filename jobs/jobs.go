@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/johnworth/jobrunner/config"
+	"github.com/johnworth/jobrunner/filesystem"
 
 	"code.google.com/p/go-uuid/uuid"
 )
@@ -188,23 +189,93 @@ func pathExists(path string) (bool, error) {
 	return false, err
 }
 
-// PathResolve returns a []byte representing either a directory listing or a
-// file download.
-func (j *Job) PathResolve(fpath string) (*os.File, error) {
-	wdir := j.WorkingDir()
-	resolvedPath := path.Join(wdir, fpath)
+// PathExists returns true if the path exists within the jobs working directory.
+func (j *Job) PathExists(fpath string) (bool, error) {
+	resolvedPath := j.JobPath(fpath)
 	exists, err := pathExists(resolvedPath)
+	if err != nil {
+		return false, err
+	}
+	return exists, err
+}
+
+// JobPath returns the path to the file in the Job's working directory. Does
+// not check for existence first.
+func (j *Job) JobPath(fpath string) string {
+	wdir := j.WorkingDir()
+	p := path.Join(wdir, fpath)
+	return p
+}
+
+// IsDir returns true if the path passed in is a directory and false otherwise.
+// If the path doesn't exist it will return false along with an error.
+func (j *Job) IsDir(fpath string) (bool, error) {
+	exists, err := j.PathExists(fpath)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return exists, fmt.Errorf("%s does not exist", fpath)
+	}
+	jpath := j.JobPath(fpath)
+	ofile, err := os.Open(jpath)
+	if err != nil {
+		return false, err
+	}
+	stat, err := ofile.Stat()
+	if err != nil {
+		return false, err
+	}
+	return stat.IsDir(), err
+}
+
+// FilePathResolve returns a *os.File representing a file download.
+func (j *Job) FilePathResolve(fpath string) (*os.File, error) {
+	exists, err := j.PathExists(fpath)
 	if err != nil {
 		return nil, err
 	}
 	if !exists {
 		return nil, fmt.Errorf("%s does not exist", fpath)
 	}
+	dircheck, err := j.IsDir(fpath)
+	if err != nil {
+		return nil, err
+	}
+	if dircheck {
+		return nil, fmt.Errorf("%s is a directory", fpath)
+	}
+	resolvedPath := j.JobPath(fpath)
 	opened, err := os.Open(resolvedPath)
 	if err != nil {
 		return nil, err
 	}
 	return opened, err
+}
+
+// DirPathResolve returns a *filesystem.DirectoryListing for the path within
+// the Job's working directory.
+func (j *Job) DirPathResolve(fpath string) (*filesystem.DirectoryListing, error) {
+	exists, err := j.PathExists(fpath)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, fmt.Errorf("%s does not exist", fpath)
+	}
+	dircheck, err := j.IsDir(fpath)
+	if err != nil {
+		return nil, err
+	}
+	if !dircheck {
+		return nil, fmt.Errorf("%s is not a directory", fpath)
+	}
+	resolvedPath := j.JobPath(fpath)
+	listing, err := filesystem.ListDir(resolvedPath)
+	if err != nil {
+		return nil, err
+	}
+	return listing, err
 }
 
 // BashCommand contains all of the state associated with a command run through

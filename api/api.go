@@ -169,12 +169,37 @@ func (h *APIHandlers) PathResolve(resp http.ResponseWriter, r *http.Request) {
 		return
 	}
 	job := h.Executor.Registry.Get(ID)
-	fileToReturn, err := job.PathResolve(path)
+	pathExists, err := job.PathExists(path)
 	if err != nil {
 		http.Error(resp, err.Error(), 500)
+	}
+	if !pathExists {
+		http.Error(resp, fmt.Sprintf("%s not found for job %s", path, ID), 404)
 		return
 	}
-	io.Copy(resp, fileToReturn)
+	dircheck, err := job.IsDir(path)
+	if err != nil {
+		http.Error(resp, err.Error(), 500)
+	}
+	if !dircheck {
+		fileToReturn, err := job.FilePathResolve(path)
+		if err != nil {
+			http.Error(resp, err.Error(), 500)
+			return
+		}
+		io.Copy(resp, fileToReturn)
+	} else {
+		listing, err := job.DirPathResolve(path)
+		if err != nil {
+			http.Error(resp, err.Error(), 500)
+			return
+		}
+		retval, err := json.Marshal(listing)
+		if err != nil {
+			http.Error(resp, err.Error(), 500)
+		}
+		resp.Write(retval)
+	}
 }
 
 // SetupRouter uses Gorilla's mux project to set up a router and returns it.
