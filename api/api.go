@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/johnworth/jobrunner/config"
 	"github.com/johnworth/jobrunner/executor"
+	"github.com/johnworth/jobrunner/filesystem"
 )
 
 func addrsAsStrings() interface{} {
@@ -91,12 +92,6 @@ func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(resp, string(returnMsg[:]))
 }
 
-// GetInfo returns info about a running job.
-func (h *APIHandlers) GetInfo(resp http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	fmt.Fprintf(resp, "GetInfo: %s\n", vars["ID"])
-}
-
 // ListResponse represents a the return value for the List endpoint.
 type ListResponse struct {
 	IDs []string
@@ -114,9 +109,8 @@ func (h *APIHandlers) List(resp http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(resp, string(jobs[:]))
 }
 
-// Attach streams a combined stdout/stderr for a running job
-// as a chunked response.
-func (h *APIHandlers) Attach(resp http.ResponseWriter, r *http.Request) {
+// DirectoryListing returns a JSON listing of a jobs working directory.
+func (h *APIHandlers) DirectoryListing(resp http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	ID := vars["ID"]
 	jobRegistry := h.Executor.Registry
@@ -124,8 +118,19 @@ func (h *APIHandlers) Attach(resp http.ResponseWriter, r *http.Request) {
 		http.Error(resp, fmt.Sprintf("Job %s not found.", ID), 404)
 		return
 	}
-	//job := jobRegistry.Get(ID)
-	fmt.Fprintf(resp, ID)
+	job := jobRegistry.Get(ID)
+	listing, err := filesystem.ListDir(job.WorkingDir())
+	if err != nil {
+		http.Error(resp, err.Error(), 500)
+		return
+	}
+
+	jsonListing, err := json.Marshal(listing)
+	if err != nil {
+		http.Error(resp, err.Error(), 500)
+		return
+	}
+	fmt.Fprintf(resp, string(jsonListing[:]))
 }
 
 // Kill kills a running job.
@@ -155,9 +160,9 @@ func (h *APIHandlers) Clean(resp http.ResponseWriter, r *http.Request) {
 // SetupRouter uses Gorilla's mux project to set up a router and returns it.
 func (h *APIHandlers) SetupRouter() *mux.Router {
 	r := mux.NewRouter()
-	r.HandleFunc("/{ID}", h.GetInfo).Methods("GET")
 	r.HandleFunc("/", h.Start).Methods("POST")
 	r.HandleFunc("/", h.List).Methods("GET")
+	r.HandleFunc("/{ID}/directory", h.DirectoryListing).Methods("GET")
 	r.HandleFunc("/{ID}/clean", h.Clean).Methods("POST")
 	r.HandleFunc("/{ID}", h.Kill).Methods("DELETE")
 	return r
