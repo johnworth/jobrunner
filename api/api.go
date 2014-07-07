@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"expvar"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -157,12 +158,32 @@ func (h *APIHandlers) Clean(resp http.ResponseWriter, r *http.Request) {
 	h.Executor.Clean(job)
 }
 
+// PathResolve will trigger a download or a directory listing for a path inside
+// the working directory of a job.
+func (h *APIHandlers) PathResolve(resp http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	ID := vars["ID"]
+	path := vars["path"]
+	if !h.Executor.Registry.HasKey(ID) {
+		http.Error(resp, fmt.Sprintf("Job %s not found", ID), 404)
+		return
+	}
+	job := h.Executor.Registry.Get(ID)
+	fileToReturn, err := job.PathResolve(path)
+	if err != nil {
+		http.Error(resp, err.Error(), 500)
+		return
+	}
+	io.Copy(resp, fileToReturn)
+}
+
 // SetupRouter uses Gorilla's mux project to set up a router and returns it.
 func (h *APIHandlers) SetupRouter() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/", h.Start).Methods("POST")
 	r.HandleFunc("/", h.List).Methods("GET")
 	r.HandleFunc("/{ID}/directory", h.DirectoryListing).Methods("GET")
+	r.HandleFunc("/{ID}/directory/{path:.*}", h.PathResolve).Methods("GET")
 	r.HandleFunc("/{ID}/clean", h.Clean).Methods("POST")
 	r.HandleFunc("/{ID}", h.Kill).Methods("DELETE")
 	return r

@@ -164,7 +164,7 @@ func (j *Job) Clean() error {
 	return err
 }
 
-// Run fires off a gorouting that iterates through the commands list and runs
+// Run fires off a goroutine that iterates through the commands list and runs
 // them one after the other. Prepare() should have been called on each command
 // before Run() is called.
 func (j *Job) Run() {
@@ -175,6 +175,36 @@ func (j *Job) Run() {
 		c.Wait()
 	}
 	j.SetCompleted(true)
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
+// PathResolve returns a []byte representing either a directory listing or a
+// file download.
+func (j *Job) PathResolve(fpath string) (*os.File, error) {
+	wdir := j.WorkingDir()
+	resolvedPath := path.Join(wdir, fpath)
+	exists, err := pathExists(resolvedPath)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, fmt.Errorf("%s does not exist", fpath)
+	}
+	opened, err := os.Open(resolvedPath)
+	if err != nil {
+		return nil, err
+	}
+	return opened, err
 }
 
 // BashCommand contains all of the state associated with a command run through

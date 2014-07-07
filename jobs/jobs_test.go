@@ -153,3 +153,45 @@ func TestJobWait(t *testing.T) {
 		t.Errorf("Exit code wasn't -9000")
 	}
 }
+
+func TestPathExists(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	exists, err := pathExists(wd)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	if !exists {
+		t.Errorf("Path reported as not existing when it should actually exist.")
+	}
+	exists2, err := pathExists("/asdfasdfasdfa")
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	if exists2 {
+		t.Errorf("Path reported as existing when it should not exist.")
+	}
+}
+
+func TestPathResolve(t *testing.T) {
+	j := NewJob()
+	j.SetWorkingDir("/tmp/jobPathResolve")
+	err := os.Mkdir("/tmp/jobPathResolve", 0755)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	defer os.RemoveAll("/tmp/jobPathResolve")
+	opened, err := os.Create("/tmp/jobPathResolve/foo")
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	opened.Write([]byte("this is a test"))
+	opened.Sync()
+	opened.Close()
+	_, err = j.PathResolve("foo")
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+}
