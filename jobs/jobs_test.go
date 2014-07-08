@@ -175,7 +175,7 @@ func TestPathExists(t *testing.T) {
 	}
 }
 
-func TestPathResolve(t *testing.T) {
+func TestFilePathResolve(t *testing.T) {
 	j := NewJob()
 	j.SetWorkingDir("/tmp/jobPathResolve")
 	err := os.Mkdir("/tmp/jobPathResolve", 0755)
@@ -190,7 +190,7 @@ func TestPathResolve(t *testing.T) {
 	opened.Write([]byte("this is a test"))
 	opened.Sync()
 	opened.Close()
-	_, err = j.PathResolve("foo")
+	_, err = j.FilePathResolve("foo")
 	if err != nil {
 		t.Errorf(err.Error())
 	}
