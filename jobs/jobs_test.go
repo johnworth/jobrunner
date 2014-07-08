@@ -249,3 +249,15 @@ func TestJobPath(t *testing.T) {
 		t.Errorf("%s is not /tmp/argle", jpath)
 	}
 }
+
+func TestPathExists2(t *testing.T) {
+	j := NewJob()
+	j.SetWorkingDir("/tmp/")
+	exists0, err := j.PathExists("foo")
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	if exists0 {
+		t.Errorf("foo exists.")
+	}
+}
