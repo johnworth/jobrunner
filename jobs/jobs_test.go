@@ -175,6 +175,37 @@ func TestPathExists(t *testing.T) {
 	}
 }
 
+func TestIsDir(t *testing.T) {
+	j := NewJob()
+	j.SetWorkingDir("/tmp/")
+	err := os.Mkdir("/tmp/dirPathResolve", 0755)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	defer os.RemoveAll("/tmp/dirPathResolve")
+	dir, err := j.IsDir("dirPathResolve")
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	if !dir {
+		t.Errorf("Not a directory.")
+	}
+	opened, err := os.Create("/tmp/dirPathResolve/foo")
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	opened.Write([]byte("this is a test"))
+	opened.Sync()
+	opened.Close()
+	dir2, err := j.IsDir("dirPathResolve/foo")
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	if dir2 {
+		t.Errorf("Is a directory and should be a file.")
+	}
+}
+
 func TestFilePathResolve(t *testing.T) {
 	j := NewJob()
 	j.SetWorkingDir("/tmp/jobPathResolve")
