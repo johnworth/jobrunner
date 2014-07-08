@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"expvar"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
+	"path"
 	"runtime"
 
 	"github.com/gorilla/mux"
@@ -163,33 +163,40 @@ func (h *APIHandlers) Clean(resp http.ResponseWriter, r *http.Request) {
 func (h *APIHandlers) PathResolve(resp http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	ID := vars["ID"]
-	path := vars["path"]
+	fpath := vars["path"]
 	if !h.Executor.Registry.HasKey(ID) {
 		http.Error(resp, fmt.Sprintf("Job %s not found", ID), 404)
 		return
 	}
 	job := h.Executor.Registry.Get(ID)
-	pathExists, err := job.PathExists(path)
+	pathExists, err := job.PathExists(fpath)
 	if err != nil {
 		http.Error(resp, err.Error(), 500)
 	}
 	if !pathExists {
-		http.Error(resp, fmt.Sprintf("%s not found for job %s", path, ID), 404)
+		http.Error(resp, fmt.Sprintf("%s not found for job %s", fpath, ID), 404)
 		return
 	}
-	dircheck, err := job.IsDir(path)
+	dircheck, err := job.IsDir(fpath)
 	if err != nil {
 		http.Error(resp, err.Error(), 500)
 	}
 	if !dircheck {
-		fileToReturn, err := job.FilePathResolve(path)
+		fileToReturn, err := job.FilePathResolve(fpath)
 		if err != nil {
 			http.Error(resp, err.Error(), 500)
 			return
 		}
-		io.Copy(resp, fileToReturn)
+		name := path.Base(fpath)
+		fpathStat, err := fileToReturn.Stat()
+		if err != nil {
+			http.Error(resp, err.Error(), 500)
+			return
+		}
+		modTime := fpathStat.ModTime()
+		http.ServeContent(resp, r, name, modTime, fileToReturn)
 	} else {
-		listing, err := job.DirPathResolve(path)
+		listing, err := job.DirPathResolve(fpath)
 		if err != nil {
 			http.Error(resp, err.Error(), 500)
 			return
