@@ -240,3 +240,12 @@ func TestDirPathResolve(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 }
+
+func TestJobPath(t *testing.T) {
+	j := NewJob()
+	j.SetWorkingDir("/tmp/")
+	jpath := j.JobPath("argle")
+	if jpath != "/tmp/argle" {
+		t.Errorf("%s is not /tmp/argle", jpath)
+	}
+}
