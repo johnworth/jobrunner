@@ -195,3 +195,17 @@ func TestFilePathResolve(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 }
+
+func TestDirPathResolve(t *testing.T) {
+	j := NewJob()
+	j.SetWorkingDir("/tmp/")
+	err := os.Mkdir("/tmp/dirPathResolve", 0755)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	defer os.RemoveAll("/tmp/dirPathResolve")
+	_, err = j.DirPathResolve("dirPathResolve")
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+}
