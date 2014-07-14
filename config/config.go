@@ -12,8 +12,11 @@ var config Config
 
 // ConfigValues contains the configuration values.
 type ConfigValues struct {
-	Host    string //The hostname:port that jobrunner should use.
-	BaseDir string //The base working directory for the jobs.
+	Host         string //The hostname:port that jobrunner should use.
+	BaseDir      string //The base working directory for the jobs.
+	DockerString string //The connection string for the docker client
+	DockerUser   string //The docker user for the connection.
+	DockerPass   string //The docker password for the connection.
 }
 
 type configAction int
@@ -46,10 +49,25 @@ func Configure() error {
 		}
 	}
 	hostname := os.Getenv("JOBRUNNER_HOSTNAME")
+	docker := os.Getenv("JOBRUNNER_DOCKER")
+	if docker == "" {
+		return fmt.Errorf("JOBRUNNER_DOCKER is not set")
+	}
+	dockerUser := os.Getenv("JOBRUNNER_DOCKER_USER")
+	if dockerUser == "" {
+		return fmt.Errorf("JOBRUNNER_DOCKER_USER is not set")
+	}
+	dockerPass := os.Getenv("JOBRUNNER_DOCKER_PASS")
+	if dockerPass == "" {
+		return fmt.Errorf("JOBRUNNER_DOCKER_PASS is not set")
+	}
 	go func() {
 		cfg := ConfigValues{
-			Host:    fmt.Sprintf("%s:%s", hostname, port),
-			BaseDir: basedir,
+			Host:         fmt.Sprintf("%s:%s", hostname, port),
+			BaseDir:      basedir,
+			DockerString: docker,
+			DockerUser:   dockerUser,
+			DockerPass:   dockerPass,
 		}
 		for cmd := range config {
 			switch cmd.action {

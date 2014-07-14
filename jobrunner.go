@@ -14,6 +14,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	server := api.NewAPIHandlers().NewServer()
+	h, err := api.NewAPIHandlers()
+	if err != nil {
+		log.Fatal(err)
+	}
+	server := h.NewServer()
 	log.Fatal(server.ListenAndServe())
 }

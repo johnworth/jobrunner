@@ -48,10 +48,43 @@ type APIHandlers struct {
 
 // NewAPIHandlers constructs a new instance of APIHandlers and returns a pointer
 // to it.
-func NewAPIHandlers() *APIHandlers {
-	return &APIHandlers{
-		Executor: executor.NewExecutor(),
+func NewAPIHandlers() (*APIHandlers, error) {
+	e, err := executor.NewExecutor()
+	if err != nil {
+		return nil, err
 	}
+	handlers := &APIHandlers{e}
+	return handlers, err
+}
+
+func validateMsgCommand(resp http.ResponseWriter, j *executor.JSONCmd) bool {
+	validKinds := map[string]bool{
+		"bash":   true,
+		"docker": true,
+	}
+	if j.Kind == "" {
+		http.Error(resp, "Missing Kind from command.", 500)
+		return false
+	}
+	if !validKinds[j.Kind] {
+		http.Error(resp, fmt.Sprintf("Missing invalid kind of command: %s", j.Kind), 500)
+		return false
+	}
+	if j.CommandLine == "" {
+		http.Error(resp, "Missing CommandLine from command.", 500)
+		return false
+	}
+	if j.Environment == nil {
+		http.Error(resp, "Missing Environment from command.", 500)
+		return false
+	}
+	if j.Kind == "docker" {
+		if j.Repository == "" {
+			http.Error(resp, "Missing docker repository from command.", 800)
+			return false
+		}
+	}
+	return true
 }
 
 //Start starts a job and returns a job ID.
@@ -67,12 +100,8 @@ func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, j := range jobMsg.Commands {
-		if j.CommandLine == "" {
-			http.Error(resp, "Missing CommandLine from command.", 500)
-			return
-		}
-		if j.Environment == nil {
-			http.Error(resp, "Missing Environment from command.", 500)
+		isValid := validateMsgCommand(resp, &j)
+		if !isValid {
 			return
 		}
 	}

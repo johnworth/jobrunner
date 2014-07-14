@@ -6,9 +6,11 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strings"
 	"sync"
 	"syscall"
 
+	"github.com/fsouza/go-dockerclient"
 	"github.com/johnworth/jobrunner/config"
 	"github.com/johnworth/jobrunner/filesystem"
 
@@ -32,13 +34,15 @@ func formatEnv(env map[string]string) []string {
 // JobCommand is an interface for any commands that can be executed as part of
 // a job.
 type JobCommand interface {
-	SetUUID(uuid string)
+	//SetUUID(uuid string)
+	SetWorkingDir(string)
+	WorkingDir() string
 	UUID() string
 	MonitorState()
-	Wait()
-	Start()
-	Prepare(c string, e map[string]string) error
-	Kill()
+	Wait() error
+	Start() error
+	Prepare(interface{}) error
+	Kill() error
 }
 
 // Job is a type that contains one or more JobCommands to be run.
@@ -171,9 +175,17 @@ func (j *Job) Clean() error {
 func (j *Job) Run() {
 	for _, c := range j.Commands() {
 		j.SetCurrent(c)
-		c.Start()
+		err := c.Start()
+		if err != nil {
+			log.Println(err.Error())
+			break
+		}
 		c.MonitorState()
-		c.Wait()
+		err = c.Wait()
+		if err != nil {
+			log.Println(err.Error())
+			break
+		}
 	}
 	j.SetCompleted(true)
 }
@@ -445,7 +457,7 @@ func (j *BashCommand) MonitorState() {
 }
 
 // Wait blocks until the running command is completed.
-func (j *BashCommand) Wait() {
+func (j *BashCommand) Wait() error {
 	uuid := j.UUID()
 	cmd := j.CmdPtr()
 	select {
@@ -453,7 +465,7 @@ func (j *BashCommand) Wait() {
 		if j.Killed() { //Command killed
 			j.SetExitCode(-100)
 			j.completed <- 1
-			return
+			return nil
 		}
 		if err == nil && j.ExitCode() == -9000 { //Command exited normally
 			if cmd.ProcessState != nil {
@@ -471,14 +483,14 @@ func (j *BashCommand) Wait() {
 		}
 		log.Printf("Job %s exited with a status of %d.", uuid, j.ExitCode())
 		j.completed <- 1
-		return
+		return nil
 	}
 }
 
 // Start gets the command running. The job will not begin until a command is set,
 // the environment is set, and the begin channel receives a message. The best
 // way to do all that is with the Prepare() method.
-func (j *BashCommand) Start() {
+func (j *BashCommand) Start() error {
 	shouldStart := false
 	var cmdString string
 	var environment map[string]string
@@ -503,15 +515,26 @@ func (j *BashCommand) Start() {
 	if err != nil {
 		j.SetExitCode(-1000)
 		j.abort <- 1
-		return
+	} else {
+		log.Printf("Started job %s.", j.UUID())
 	}
-	log.Printf("Started job %s.", j.UUID())
+	return err
+}
+
+// BashCommandSettings contains settings needed by a BashCommand instance for its
+// Prepare function.
+type BashCommandSettings struct {
+	Command     string
+	Environment map[string]string
 }
 
 // Prepare allows the caller to set the command and environment for the job.
 // Call this before or after Start(). It doesn't matter when, but it must be
-// called.
-func (j *BashCommand) Prepare(command string, environment map[string]string) error {
+// called. The parameter should be an instance of BashCommandSettings.
+func (j *BashCommand) Prepare(bcs interface{}) error {
+	settings := bcs.(BashCommandSettings)
+	command := settings.Command
+	environment := settings.Environment
 	err := os.MkdirAll(j.WorkingDir(), 0755)
 	if err != nil {
 		return err
@@ -526,6 +549,283 @@ func (j *BashCommand) Prepare(command string, environment map[string]string) err
 }
 
 // Kill kills a command.
-func (j *BashCommand) Kill() {
+func (j *BashCommand) Kill() error {
 	j.kill <- 1
+	return nil
+}
+
+// DockerCommand represents a command that runs in a Docker instance. The UUID
+// returned is NOT the same UUID assigned by docker at start since creating
+// a DockerCommand is not the same as running it.
+type DockerCommand struct {
+	client         *docker.Client
+	cmd            *exec.Cmd
+	cmdLock        *sync.RWMutex
+	command        string
+	imageID        string
+	imageIDLock    *sync.RWMutex
+	commandLock    *sync.RWMutex
+	done           chan error
+	abort          chan int
+	environment    []string
+	envLock        *sync.RWMutex
+	begin          chan int
+	began          chan int
+	kill           chan int
+	killed         bool
+	killedLock     *sync.RWMutex
+	Output         chan []byte
+	exitCode       int
+	exitCodeLock   *sync.RWMutex
+	completed      chan int
+	dockerUUID     string
+	dockerUUIDLock *sync.RWMutex
+	uuid           string
+	uuidLock       *sync.RWMutex
+	workingDir     string
+	workingDirLock *sync.RWMutex
+	repository     string
+	registry       string
+	tag            string
+}
+
+// NewDockerCommand accepts a pointer to a docker Client
+func NewDockerCommand(client *docker.Client) *DockerCommand {
+	dc := &DockerCommand{
+		client:         client,
+		cmd:            nil,
+		cmdLock:        &sync.RWMutex{},
+		command:        "",
+		commandLock:    &sync.RWMutex{},
+		imageID:        "",
+		imageIDLock:    &sync.RWMutex{},
+		dockerUUID:     "",
+		dockerUUIDLock: &sync.RWMutex{},
+		done:           make(chan error),
+		abort:          make(chan int),
+		environment:    make([]string, 0),
+		envLock:        &sync.RWMutex{},
+		begin:          make(chan int),
+		began:          make(chan int),
+		kill:           make(chan int),
+		killed:         false,
+		killedLock:     &sync.RWMutex{},
+		Output:         make(chan []byte),
+		exitCode:       -9000,
+		exitCodeLock:   &sync.RWMutex{},
+		completed:      make(chan int),
+		uuid:           "",
+		uuidLock:       &sync.RWMutex{},
+		workingDir:     "",
+		workingDirLock: &sync.RWMutex{},
+		repository:     "",
+		registry:       "",
+		tag:            "",
+	}
+	return dc
+}
+
+// CmdPtr returns the pointer to the exec.Cmd instance that's running docker.
+// Use it carefully.
+func (d *DockerCommand) CmdPtr() *exec.Cmd {
+	d.cmdLock.RLock()
+	defer d.cmdLock.RUnlock()
+	return d.cmd
+}
+
+// SetCmdPtr sets the pointer to the exec.Cmd instance that should be running
+// docker.
+func (d *DockerCommand) SetCmdPtr(c *exec.Cmd) {
+	d.cmdLock.Lock()
+	defer d.cmdLock.Unlock()
+	d.cmd = c
+}
+
+// Command returns the shell command to be run in the container.
+func (d *DockerCommand) Command() string {
+	d.commandLock.RLock()
+	defer d.commandLock.RUnlock()
+	return d.command
+}
+
+// SetCommand sets the shell command to be run in the container.
+func (d *DockerCommand) SetCommand(c string) {
+	d.commandLock.Lock()
+	defer d.commandLock.Unlock()
+	d.command = c
+}
+
+// Environment returns the environment variables passed to the container.
+func (d *DockerCommand) Environment() []string {
+	d.envLock.RLock()
+	defer d.envLock.RUnlock()
+	return d.environment
+}
+
+// SetEnvironment sets the environment variables used in the container.
+func (d *DockerCommand) SetEnvironment(e []string) {
+	d.envLock.Lock()
+	defer d.envLock.Unlock()
+	d.environment = e
+}
+
+// ImageID returns the docker image ID for this command.
+func (d *DockerCommand) ImageID() string {
+	d.imageIDLock.RLock()
+	defer d.imageIDLock.RUnlock()
+	return d.imageID
+}
+
+// FormatImageID returns an string image ID from a DockerCommandSettings
+// instance. The returned ID will be in the format 'registry/repository:tag'.
+func FormatImageID(dcs *DockerCommandSettings) string {
+	imageID := dcs.Repository
+	if dcs.Registry != "" {
+		imageID = fmt.Sprintf("%s/%s", dcs.Registry, imageID)
+	}
+	if dcs.Tag != "" {
+		imageID = fmt.Sprintf("%s:%s", imageID, dcs.Tag)
+	}
+	return imageID
+}
+
+// SetImageID sets the image ID that will be used to start up the container.
+func (d *DockerCommand) SetImageID(dcs *DockerCommandSettings) {
+	d.imageIDLock.Lock()
+	defer d.imageIDLock.Unlock()
+	d.imageID = FormatImageID(dcs)
+}
+
+// UUID returns the UUID for the DockerCommand as a string. This is NOT the same
+// as the UUID returned by Docker when a container is started.
+func (d *DockerCommand) UUID() string {
+	d.uuidLock.RLock()
+	defer d.uuidLock.RUnlock()
+	return d.uuid
+}
+
+// SetUUID sets the jobrunner assigned UUID for this command.
+func (d *DockerCommand) SetUUID(u string) {
+	d.uuidLock.Lock()
+	defer d.uuidLock.Unlock()
+	d.uuid = u
+}
+
+// SetWorkingDir sets the working directory for the DockerCommand.
+func (d *DockerCommand) SetWorkingDir(w string) {
+	d.workingDirLock.Lock()
+	defer d.workingDirLock.Unlock()
+	d.workingDir = w
+}
+
+// WorkingDir returns the DockerCommand's working directory as a string.
+func (d *DockerCommand) WorkingDir() string {
+	d.workingDirLock.RLock()
+	defer d.workingDirLock.RUnlock()
+	return d.workingDir
+}
+
+// SetExitCode sets the exit code for the DockerCommand.
+func (d *DockerCommand) SetExitCode(e int) {
+	d.exitCodeLock.Lock()
+	defer d.exitCodeLock.Unlock()
+	d.exitCode = e
+}
+
+// ExitCode returns the exit code for a DockerCommand as an int.
+func (d *DockerCommand) ExitCode() int {
+	d.exitCodeLock.RLock()
+	defer d.exitCodeLock.RUnlock()
+	return d.exitCode
+}
+
+// MonitorState tracks the current state of the container.
+func (d *DockerCommand) MonitorState() {
+	return
+}
+
+// Wait blocks until the container that DockerCommand tracks finishes executing.
+func (d *DockerCommand) Wait() error {
+	ptr := d.CmdPtr()
+	err := ptr.Wait()
+	if err != nil {
+		log.Printf(err.Error())
+	}
+	return err
+}
+
+// VolumesSetting returns a []string containing the settings for volumes that get
+// passed to docker.
+func (d *DockerCommand) VolumesSetting() []string {
+	return []string{"-v", fmt.Sprintf("%s:/data", d.WorkingDir())}
+}
+
+// Start spins up the DockerCommand. Make sure the image ID and working directory have
+// already been set.
+func (d *DockerCommand) Start() error {
+	args := []string{"run", "-i", "-t"}
+	for _, v := range d.VolumesSetting() {
+		args = append(args, v)
+	}
+	for _, e := range d.Environment() {
+		if e != "" {
+			args = append(args, "--env")
+			args = append(args, e)
+		}
+	}
+	args = append(args, "-a")
+	args = append(args, "stdout")
+	args = append(args, "-a")
+	args = append(args, "stderr")
+	args = append(args, d.ImageID())
+	for _, c := range strings.Split(d.Command(), " ") {
+		args = append(args, c)
+	}
+	//args = append(args, d.Command())
+	cmd := exec.Command("docker", args...)
+	d.SetCmdPtr(cmd)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err := cmd.Start()
+	return err
+}
+
+// DockerCommandSettings contains configuration settings for a DockerCommand
+// instance. Used for in the Prepare() function.
+type DockerCommandSettings struct {
+	Repository  string
+	Registry    string
+	Tag         string
+	Command     string
+	Environment map[string]string
+	WorkingDir  string
+}
+
+// Prepare will Pull the Docker image and parse out the environment variables
+// into a format that Docker can use. The parameter should be an instance of
+// DockerCommandSettings.
+func (d *DockerCommand) Prepare(dcs interface{}) error {
+	settings := dcs.(DockerCommandSettings)
+	d.SetImageID(&settings)
+	d.SetWorkingDir(settings.WorkingDir)
+	d.SetCommand(settings.Command)
+	d.SetEnvironment(formatEnv(settings.Environment))
+	d.repository = settings.Repository
+	d.registry = settings.Registry
+	d.tag = settings.Tag
+	pullCmd := exec.Command("docker", "pull", d.ImageID())
+	pullCmd.Stdout = os.Stdout
+	pullCmd.Stderr = os.Stderr
+	err := pullCmd.Run()
+	return err
+}
+
+// Kill will stop the container.
+func (d *DockerCommand) Kill() error {
+	d.dockerUUIDLock.RLock()
+	defer d.dockerUUIDLock.RUnlock()
+	killOpts := docker.KillContainerOptions{
+		ID: d.dockerUUID,
+	}
+	return d.client.KillContainer(killOpts)
 }
