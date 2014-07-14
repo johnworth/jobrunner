@@ -591,6 +591,7 @@ type DockerCommand struct {
 
 // NewDockerCommand accepts a pointer to a docker Client
 func NewDockerCommand(client *docker.Client) *DockerCommand {
+	uuid := uuid.New()
 	dc := &DockerCommand{
 		client:         client,
 		cmd:            nil,
@@ -614,7 +615,7 @@ func NewDockerCommand(client *docker.Client) *DockerCommand {
 		exitCode:       -9000,
 		exitCodeLock:   &sync.RWMutex{},
 		completed:      make(chan int),
-		uuid:           "",
+		uuid:           uuid,
 		uuidLock:       &sync.RWMutex{},
 		workingDir:     "",
 		workingDirLock: &sync.RWMutex{},
@@ -781,12 +782,21 @@ func (d *DockerCommand) Start() error {
 	for _, c := range strings.Split(d.Command(), " ") {
 		args = append(args, c)
 	}
-	//args = append(args, d.Command())
+	stdoutFile, err := os.Create(path.Join(d.WorkingDir(), d.UUID()+".stdout"))
+	if err != nil {
+		log.Printf(err.Error())
+		return err
+	}
+	stderrFile, err := os.Create(path.Join(d.WorkingDir(), d.UUID()+".stderr"))
+	if err != nil {
+		log.Printf(err.Error())
+		return err
+	}
 	cmd := exec.Command("docker", args...)
 	d.SetCmdPtr(cmd)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Start()
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+	err = cmd.Start()
 	return err
 }
 
@@ -813,10 +823,18 @@ func (d *DockerCommand) Prepare(dcs interface{}) error {
 	d.repository = settings.Repository
 	d.registry = settings.Registry
 	d.tag = settings.Tag
+	pullStdout, err := os.Create(path.Join(d.WorkingDir(), "docker-pull.stdout"))
+	if err != nil {
+		return err
+	}
+	pullStderr, err := os.Create(path.Join(d.WorkingDir(), "docker-pull.stderr"))
+	if err != nil {
+		return err
+	}
 	pullCmd := exec.Command("docker", "pull", d.ImageID())
-	pullCmd.Stdout = os.Stdout
-	pullCmd.Stderr = os.Stderr
-	err := pullCmd.Run()
+	pullCmd.Stdout = pullStdout
+	pullCmd.Stderr = pullStderr
+	err = pullCmd.Run()
 	return err
 }
 
