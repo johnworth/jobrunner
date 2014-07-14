@@ -13,6 +13,7 @@ import (
 	"github.com/fsouza/go-dockerclient"
 	"github.com/johnworth/jobrunner/config"
 	"github.com/johnworth/jobrunner/filesystem"
+	"github.com/johnworth/jobrunner/jsonify"
 
 	"code.google.com/p/go-uuid/uuid"
 )
@@ -36,6 +37,9 @@ func formatEnv(env map[string]string) []string {
 type JobCommand interface {
 	//SetUUID(uuid string)
 	SetWorkingDir(string)
+	Setup(string) error
+	SetJSONCmd(*jsonify.JSONCmd)
+	JSONCmd() *jsonify.JSONCmd
 	WorkingDir() string
 	UUID() string
 	MonitorState()
@@ -294,6 +298,8 @@ func (j *Job) DirPathResolve(fpath string) (*filesystem.DirectoryListing, error)
 // bash.
 type BashCommand struct {
 	command        chan string
+	jsonCmd        *jsonify.JSONCmd
+	jsonCmdLock    *sync.RWMutex
 	done           chan error
 	abort          chan int
 	environment    chan map[string]string
@@ -319,6 +325,7 @@ func NewBashCommand() *BashCommand {
 	newUUID := uuid.New()
 	j := &BashCommand{
 		command:        make(chan string),
+		jsonCmdLock:    &sync.RWMutex{},
 		done:           make(chan error),
 		abort:          make(chan int),
 		environment:    make(chan map[string]string),
@@ -331,11 +338,9 @@ func NewBashCommand() *BashCommand {
 		exitCode:       -9000,
 		exitCodeLock:   &sync.Mutex{},
 		completed:      make(chan int),
-		cmdPtr:         nil,
 		cmdPtrLock:     &sync.Mutex{},
 		uuid:           newUUID,
 		uuidLock:       &sync.Mutex{},
-		workingDir:     "",
 		workingDirLock: &sync.Mutex{},
 	}
 	return j
@@ -346,6 +351,20 @@ func (j *BashCommand) SetWorkingDir(w string) {
 	j.workingDirLock.Lock()
 	defer j.workingDirLock.Unlock()
 	j.workingDir = w
+}
+
+// SetJSONCmd sets the jsonify.JSONCmd associated with this Command.
+func (j *BashCommand) SetJSONCmd(c *jsonify.JSONCmd) {
+	j.jsonCmdLock.Lock()
+	defer j.jsonCmdLock.Unlock()
+	j.jsonCmd = c
+}
+
+// JSONCmd returns the jsonify.JSONCmd associated with this Command.
+func (j *BashCommand) JSONCmd() *jsonify.JSONCmd {
+	j.jsonCmdLock.RLock()
+	defer j.jsonCmdLock.RUnlock()
+	return j.jsonCmd
 }
 
 // WorkingDir returns the working directory for a BashCommand. Should be threadsafe.
@@ -420,6 +439,25 @@ func (j *BashCommand) UUID() string {
 	retval = j.uuid
 	j.uuidLock.Unlock()
 	return retval
+}
+
+// Setup creates the working directory and calls Prepare()
+func (j *BashCommand) Setup(workingDir string) error {
+	c := j.JSONCmd()
+	if c.WorkingDir != "" {
+		j.SetWorkingDir(path.Join(workingDir, c.WorkingDir))
+	} else {
+		j.SetWorkingDir(workingDir)
+	}
+	settings := BashCommandSettings{
+		Command:     c.CommandLine,
+		Environment: c.Environment,
+	}
+	err := j.Prepare(settings)
+	if err != nil {
+		return err
+	}
+	return err
 }
 
 // MonitorState fires off two goroutines: one that waits for a message on the
@@ -559,6 +597,8 @@ func (j *BashCommand) Kill() error {
 // a DockerCommand is not the same as running it.
 type DockerCommand struct {
 	client         *docker.Client
+	jsonCmd        *jsonify.JSONCmd
+	jsonCmdLock    *sync.RWMutex
 	cmd            *exec.Cmd
 	cmdLock        *sync.RWMutex
 	command        string
@@ -596,6 +636,7 @@ func NewDockerCommand(client *docker.Client) *DockerCommand {
 		client:         client,
 		cmd:            nil,
 		cmdLock:        &sync.RWMutex{},
+		jsonCmdLock:    &sync.RWMutex{},
 		command:        "",
 		commandLock:    &sync.RWMutex{},
 		imageID:        "",
@@ -745,6 +786,20 @@ func (d *DockerCommand) MonitorState() {
 	return
 }
 
+// SetJSONCmd sets the jsonify.JSONCmd associated with this Command.
+func (d *DockerCommand) SetJSONCmd(c *jsonify.JSONCmd) {
+	d.jsonCmdLock.Lock()
+	defer d.jsonCmdLock.Unlock()
+	d.jsonCmd = c
+}
+
+// JSONCmd returns the jsonify.JSONCmd associated with this Command.
+func (d *DockerCommand) JSONCmd() *jsonify.JSONCmd {
+	d.jsonCmdLock.RLock()
+	defer d.jsonCmdLock.RUnlock()
+	return d.jsonCmd
+}
+
 // Wait blocks until the container that DockerCommand tracks finishes executing.
 func (d *DockerCommand) Wait() error {
 	ptr := d.CmdPtr()
@@ -809,6 +864,29 @@ type DockerCommandSettings struct {
 	Command     string
 	Environment map[string]string
 	WorkingDir  string
+}
+
+// Setup sets the working directory and calls Prepare()
+func (d *DockerCommand) Setup(workingDir string) error {
+	c := d.JSONCmd()
+	if c.WorkingDir != "" {
+		d.SetWorkingDir(path.Join(workingDir, c.WorkingDir))
+	} else {
+		d.SetWorkingDir(workingDir)
+	}
+	settings := DockerCommandSettings{
+		Command:     c.CommandLine,
+		Environment: c.Environment,
+		WorkingDir:  d.WorkingDir(),
+		Repository:  c.Repository,
+		Registry:    c.Registry,
+		Tag:         c.Tag,
+	}
+	err := d.Prepare(settings)
+	if err != nil {
+		return err
+	}
+	return err
 }
 
 // Prepare will Pull the Docker image and parse out the environment variables

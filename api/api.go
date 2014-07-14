@@ -14,6 +14,7 @@ import (
 	"github.com/johnworth/jobrunner/config"
 	"github.com/johnworth/jobrunner/executor"
 	"github.com/johnworth/jobrunner/filesystem"
+	"github.com/johnworth/jobrunner/jsonify"
 )
 
 func addrsAsStrings() interface{} {
@@ -57,7 +58,7 @@ func NewAPIHandlers() (*APIHandlers, error) {
 	return handlers, err
 }
 
-func validateMsgCommand(resp http.ResponseWriter, j *executor.JSONCmd) bool {
+func validateMsgCommand(resp http.ResponseWriter, j *jsonify.JSONCmd) bool {
 	validKinds := map[string]bool{
 		"bash":   true,
 		"docker": true,
@@ -90,7 +91,7 @@ func validateMsgCommand(resp http.ResponseWriter, j *executor.JSONCmd) bool {
 //Start starts a job and returns a job ID.
 func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
-	var jobMsg executor.StartMsg
+	var jobMsg jsonify.StartMsg
 	if err := dec.Decode(&jobMsg); err != nil {
 		http.Error(resp, err.Error(), 500)
 		return
@@ -110,7 +111,7 @@ func (h *APIHandlers) Start(resp http.ResponseWriter, r *http.Request) {
 		http.Error(resp, err.Error(), 500)
 		return
 	}
-	returnMsg, err := json.Marshal(&executor.IDMsg{
+	returnMsg, err := json.Marshal(&jsonify.IDMsg{
 		JobID:      jid,
 		CommandIDs: cids,
 	})

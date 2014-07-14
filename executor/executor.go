@@ -8,30 +8,8 @@ import (
 	"github.com/fsouza/go-dockerclient"
 	"github.com/johnworth/jobrunner/config"
 	"github.com/johnworth/jobrunner/jobs"
+	"github.com/johnworth/jobrunner/jsonify"
 )
-
-// JSONCmd represents a single command for a job as sent by a client.
-type JSONCmd struct {
-	Kind        string
-	CommandLine string
-	Environment map[string]string
-	WorkingDir  string
-	Registry    string
-	Repository  string
-	Tag         string
-}
-
-// StartMsg represents a job start request
-type StartMsg struct {
-	Commands   []JSONCmd
-	WorkingDir string
-}
-
-// IDMsg represents a ID response
-type IDMsg struct {
-	JobID      string
-	CommandIDs []string
-}
 
 type registryCommand struct {
 	action registryAction
@@ -159,49 +137,8 @@ func NewExecutor() (*Executor, error) {
 	return e, err
 }
 
-func (e *Executor) prepBashCmd(workingDir string, c *JSONCmd) (*jobs.BashCommand, error) {
-	command := jobs.NewBashCommand()
-	if c.WorkingDir != "" {
-		command.SetWorkingDir(path.Join(workingDir, c.WorkingDir))
-	} else {
-		command.SetWorkingDir(workingDir)
-	}
-	settings := jobs.BashCommandSettings{
-		Command:     c.CommandLine,
-		Environment: c.Environment,
-	}
-	err := command.Prepare(settings)
-	if err != nil {
-		return nil, err
-	}
-	return command, err
-}
-
-func (e *Executor) prepDockerCmd(workingDir string, c *JSONCmd) (*jobs.DockerCommand, error) {
-	command := jobs.NewDockerCommand(e.Docker)
-	if c.WorkingDir != "" {
-		command.SetWorkingDir(path.Join(workingDir, c.WorkingDir))
-	} else {
-		command.SetWorkingDir(workingDir)
-	}
-	fmt.Println(command.WorkingDir())
-	settings := jobs.DockerCommandSettings{
-		Command:     c.CommandLine,
-		Environment: c.Environment,
-		WorkingDir:  command.WorkingDir(),
-		Repository:  c.Repository,
-		Registry:    c.Registry,
-		Tag:         c.Tag,
-	}
-	err := command.Prepare(settings)
-	if err != nil {
-		return nil, err
-	}
-	return command, err
-}
-
 // Execute processes the JSONCmds passed in a Runs a job.
-func (e *Executor) Execute(msg *StartMsg) (string, []string, error) {
+func (e *Executor) Execute(msg *jsonify.StartMsg) (string, []string, error) {
 	cfg := config.Get()
 	var commandIDs []string
 	job := jobs.NewJob()
@@ -225,24 +162,30 @@ func (e *Executor) Execute(msg *StartMsg) (string, []string, error) {
 
 	//Add commands to the job
 	for _, c := range msg.Commands {
-		log.Printf("Handling command of type %s\n", c.Kind)
 		var command jobs.JobCommand
+		log.Printf("Handling command of type %s\n", c.Kind)
 		switch c.Kind {
 		case "bash":
-			command, err = e.prepBashCmd(workingDir, &c)
+			command = jobs.NewBashCommand()
 		case "docker":
-			command, err = e.prepDockerCmd(workingDir, &c)
+			command = jobs.NewDockerCommand(e.Docker)
 		default:
 			return "", nil, fmt.Errorf("Unknown command type '%s'", c.Kind)
 		}
 		if err != nil {
 			return "", nil, err
 		}
+		command.SetJSONCmd(&c)
 		job.AddCommand(command)
 		commandIDs = append(commandIDs, command.UUID())
 	}
 	e.Registry.Register(job)
-	go job.Run()
+	go func() {
+		for _, cmd := range job.Commands() {
+			cmd.Setup(workingDir)
+		}
+		job.Run()
+	}()
 	return job.UUID(), commandIDs, err
 }
 
