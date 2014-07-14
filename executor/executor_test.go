@@ -7,6 +7,7 @@ import (
 
 	"github.com/johnworth/jobrunner/config"
 	"github.com/johnworth/jobrunner/jobs"
+	"github.com/johnworth/jobrunner/jsonify"
 
 	"testing"
 	"time"
@@ -95,10 +96,13 @@ func TestRegistryList(t *testing.T) {
 }
 
 func TestExecutorExecute(t *testing.T) {
-	var start StartMsg
-	jobsString := "{\"Commands\":[{\"CommandLine\":\"echo foo\", \"Environment\":{}}]}"
+	var start jsonify.StartMsg
+	jobsString := "{\"Commands\":[{\"Kind\":\"bash\", \"CommandLine\":\"echo foo\", \"Environment\":{}}]}"
 	json.Unmarshal([]byte(jobsString), &start)
-	e := NewExecutor()
+	e, err := NewExecutor()
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 	fmt.Println(len(start.Commands))
 	id, commandIDs, err := e.Execute(&start)
 	job := e.Registry.Get(id)
@@ -115,10 +119,13 @@ func TestExecutorExecute(t *testing.T) {
 }
 
 func TestExecutorKill(t *testing.T) {
-	var start StartMsg
-	jobString := "{\"Commands\":[{\"CommandLine\":\"while true; do echo foo; done\", \"Environment\":{}}]}"
+	var start jsonify.StartMsg
+	jobString := "{\"Commands\":[{\"Kind\":\"bash\", \"CommandLine\":\"while true; do echo foo; done\", \"Environment\":{}}]}"
 	json.Unmarshal([]byte(jobString), &start)
-	e := NewExecutor()
+	e, err := NewExecutor()
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 	jobid, _, err := e.Execute(&start)
 	if err != nil {
 		t.Errorf(err.Error())

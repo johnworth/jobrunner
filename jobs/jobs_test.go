@@ -94,7 +94,11 @@ func TestPrepare(t *testing.T) {
 		<-j.begin
 		j.began <- 1
 	}()
-	err := j.Prepare("foobar", map[string]string{"foo": "bar"})
+	bcs := BashCommandSettings{
+		Command:     "foobar",
+		Environment: map[string]string{"foo": "bar"},
+	}
+	err := j.Prepare(bcs)
 	if err != nil {
 		t.Errorf(err.Error())
 	}
@@ -113,7 +117,11 @@ func TestJobStart(t *testing.T) {
 	b.SetWorkingDir("/tmp/testJobStart")
 	defer os.RemoveAll("/tmp/testJobStart")
 	j.AddCommand(b)
-	b.Prepare("echo foo", map[string]string{})
+	bcs := BashCommandSettings{
+		Command:     "echo foo",
+		Environment: map[string]string{},
+	}
+	b.Prepare(bcs)
 	b.Start()
 	b.MonitorState()
 	if b.CmdPtr() == nil {
@@ -127,7 +135,11 @@ func TestMonitorState1(t *testing.T) {
 	b.SetWorkingDir("/tmp/testMonitorState")
 	defer os.RemoveAll("/tmp/testMonitorState")
 	j.AddCommand(b)
-	b.Prepare("while true; do echo 1; done", map[string]string{})
+	bcs := BashCommandSettings{
+		Command:     "while true; do echo 1; done",
+		Environment: map[string]string{},
+	}
+	b.Prepare(bcs)
 	b.Start()
 	b.MonitorState()
 	b.Kill()
@@ -142,7 +154,11 @@ func TestJobWait(t *testing.T) {
 	b.SetWorkingDir("/tmp/testJobWait")
 	defer os.RemoveAll("/tmp/testJobWait")
 	j.AddCommand(b)
-	b.Prepare("echo true", map[string]string{})
+	bcs := BashCommandSettings{
+		Command:     "echo true",
+		Environment: map[string]string{},
+	}
+	b.Prepare(bcs)
 	b.Start()
 	b.MonitorState()
 	b.Wait()

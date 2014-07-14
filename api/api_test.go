@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/johnworth/jobrunner/config"
-	"github.com/johnworth/jobrunner/executor"
+	"github.com/johnworth/jobrunner/jsonify"
 )
 
 func init() {
@@ -18,8 +18,11 @@ func init() {
 }
 
 func TestStart(t *testing.T) {
-	h := NewAPIHandlers()
-	reqBody := strings.NewReader("{\"Commands\" : [{\"CommandLine\":\"echo foo\", \"Environment\":{}}]}")
+	h, err := NewAPIHandlers()
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	reqBody := strings.NewReader("{\"Commands\" : [{\"Kind\":\"bash\", \"CommandLine\":\"echo foo\", \"Environment\":{}}]}")
 	req, err := http.NewRequest("POST", "http://localhost:8080/", reqBody)
 	if err != nil {
 		t.Fail()
@@ -27,10 +30,10 @@ func TestStart(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.Start(rec, req)
 	if rec.Code != 200 {
-		t.Errorf("Status code was not 200.")
+		t.Errorf("Status code was not 200. Body was %s", rec.Body)
 	}
 	dec := json.NewDecoder(rec.Body)
-	var msg executor.IDMsg
+	var msg jsonify.IDMsg
 	if err := dec.Decode(&msg); err != nil {
 		t.Errorf("Failed to decode response body.")
 	}
@@ -63,9 +66,12 @@ func slicesEquivalent(s1 []string, s2 []string) bool {
 }
 
 func TestList(t *testing.T) {
-	h := NewAPIHandlers()
-	reqBody := strings.NewReader("{\"Commands\" : [{\"CommandLine\":\"while true; do echo $FOO; done\", \"Environment\":{}}]}")
-	reqBody2 := strings.NewReader("{\"Commands\" : [{\"CommandLine\":\"while true; do echo $FOO; done\", \"Environment\":{}}]}")
+	h, err := NewAPIHandlers()
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+	reqBody := strings.NewReader("{\"Commands\" : [{\"Kind\":\"bash\", \"CommandLine\":\"while true; do echo $FOO; done\", \"Environment\":{}}]}")
+	reqBody2 := strings.NewReader("{\"Commands\" : [{\"Kind\":\"bash\", \"CommandLine\":\"while true; do echo $FOO; done\", \"Environment\":{}}]}")
 	startReq, err := http.NewRequest("POST", "http://localhost:8080/", reqBody)
 	if err != nil {
 		t.Fail()
@@ -80,14 +86,14 @@ func TestList(t *testing.T) {
 	h.Start(rec2, startReq2)
 	dec1 := json.NewDecoder(rec1.Body)
 	dec2 := json.NewDecoder(rec2.Body)
-	var msg1 executor.IDMsg
+	var msg1 jsonify.IDMsg
 	if err := dec1.Decode(&msg1); err != nil {
 		t.Errorf("Failed to decode response body.")
 	}
 	job1 := h.Executor.Registry.Get(msg1.JobID)
 	defer h.Executor.Kill(job1)
 	defer os.RemoveAll(job1.WorkingDir())
-	var msg2 executor.IDMsg
+	var msg2 jsonify.IDMsg
 	if err := dec2.Decode(&msg2); err != nil {
 		t.Errorf("Failed to decode response body.")
 	}
