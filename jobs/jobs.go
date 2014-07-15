@@ -36,16 +36,16 @@ func formatEnv(env map[string]string) []string {
 // a job.
 type JobCommand interface {
 	//SetUUID(uuid string)
-	SetWorkingDir(string)
+	//SetWorkingDir(string)
 	Setup(string) error
-	SetJSONCmd(*jsonify.JSONCmd)
-	JSONCmd() *jsonify.JSONCmd
-	WorkingDir() string
-	UUID() string
+	//SetJSONCmd(*jsonify.JSONCmd)
+	//JSONCmd() *jsonify.JSONCmd
+	//WorkingDir() string
+	//UUID() string
 	MonitorState()
 	Wait() error
 	Start() error
-	Prepare(interface{}) error
+	//Prepare(interface{}) error
 	Kill() error
 }
 
@@ -321,10 +321,11 @@ type BashCommand struct {
 }
 
 // NewBashCommand returns a pointer to a new instance of BashCommand.
-func NewBashCommand() *BashCommand {
+func NewBashCommand(jcmd *jsonify.JSONCmd) *BashCommand {
 	newUUID := uuid.New()
 	j := &BashCommand{
 		command:        make(chan string),
+		jsonCmd:        jcmd,
 		jsonCmdLock:    &sync.RWMutex{},
 		done:           make(chan error),
 		abort:          make(chan int),
@@ -596,189 +597,68 @@ func (j *BashCommand) Kill() error {
 // returned is NOT the same UUID assigned by docker at start since creating
 // a DockerCommand is not the same as running it.
 type DockerCommand struct {
-	client         *docker.Client
-	jsonCmd        *jsonify.JSONCmd
-	jsonCmdLock    *sync.RWMutex
-	cmd            *exec.Cmd
-	cmdLock        *sync.RWMutex
-	command        string
-	imageID        string
-	imageIDLock    *sync.RWMutex
-	commandLock    *sync.RWMutex
-	done           chan error
-	abort          chan int
-	environment    []string
-	envLock        *sync.RWMutex
-	begin          chan int
-	began          chan int
-	kill           chan int
-	killed         bool
-	killedLock     *sync.RWMutex
-	Output         chan []byte
-	exitCode       int
-	exitCodeLock   *sync.RWMutex
-	completed      chan int
-	dockerUUID     string
-	dockerUUIDLock *sync.RWMutex
-	uuid           string
-	uuidLock       *sync.RWMutex
-	workingDir     string
-	workingDirLock *sync.RWMutex
-	repository     string
-	registry       string
-	tag            string
+	Client      *docker.Client
+	JSONCmd     *jsonify.JSONCmd
+	Cmd         *exec.Cmd
+	Command     string
+	ImageID     string
+	done        chan error
+	abort       chan int
+	Environment []string
+	begin       chan int
+	began       chan int
+	kill        chan int
+	Killed      bool
+	Output      chan []byte
+	ExitCode    int
+	Completed   chan int
+	DockerUUID  string
+	UUID        string
+	WorkingDir  string
+	Repository  string
+	Registry    string
+	Tag         string
 }
 
 // NewDockerCommand accepts a pointer to a docker Client
-func NewDockerCommand(client *docker.Client) *DockerCommand {
+func NewDockerCommand(client *docker.Client, jcmd *jsonify.JSONCmd) *DockerCommand {
 	uuid := uuid.New()
 	dc := &DockerCommand{
-		client:         client,
-		cmd:            nil,
-		cmdLock:        &sync.RWMutex{},
-		jsonCmdLock:    &sync.RWMutex{},
-		command:        "",
-		commandLock:    &sync.RWMutex{},
-		imageID:        "",
-		imageIDLock:    &sync.RWMutex{},
-		dockerUUID:     "",
-		dockerUUIDLock: &sync.RWMutex{},
-		done:           make(chan error),
-		abort:          make(chan int),
-		environment:    make([]string, 0),
-		envLock:        &sync.RWMutex{},
-		begin:          make(chan int),
-		began:          make(chan int),
-		kill:           make(chan int),
-		killed:         false,
-		killedLock:     &sync.RWMutex{},
-		Output:         make(chan []byte),
-		exitCode:       -9000,
-		exitCodeLock:   &sync.RWMutex{},
-		completed:      make(chan int),
-		uuid:           uuid,
-		uuidLock:       &sync.RWMutex{},
-		workingDir:     "",
-		workingDirLock: &sync.RWMutex{},
-		repository:     "",
-		registry:       "",
-		tag:            "",
+		Client:      client,
+		JSONCmd:     jcmd,
+		Command:     "",
+		ImageID:     "",
+		DockerUUID:  "",
+		done:        make(chan error),
+		abort:       make(chan int),
+		Environment: make([]string, 0),
+		begin:       make(chan int),
+		began:       make(chan int),
+		kill:        make(chan int),
+		Killed:      false,
+		Output:      make(chan []byte),
+		ExitCode:    -9000,
+		Completed:   make(chan int),
+		UUID:        uuid,
+		WorkingDir:  "",
+		Repository:  "",
+		Registry:    "",
+		Tag:         "",
 	}
 	return dc
 }
 
-// CmdPtr returns the pointer to the exec.Cmd instance that's running docker.
-// Use it carefully.
-func (d *DockerCommand) CmdPtr() *exec.Cmd {
-	d.cmdLock.RLock()
-	defer d.cmdLock.RUnlock()
-	return d.cmd
-}
-
-// SetCmdPtr sets the pointer to the exec.Cmd instance that should be running
-// docker.
-func (d *DockerCommand) SetCmdPtr(c *exec.Cmd) {
-	d.cmdLock.Lock()
-	defer d.cmdLock.Unlock()
-	d.cmd = c
-}
-
-// Command returns the shell command to be run in the container.
-func (d *DockerCommand) Command() string {
-	d.commandLock.RLock()
-	defer d.commandLock.RUnlock()
-	return d.command
-}
-
-// SetCommand sets the shell command to be run in the container.
-func (d *DockerCommand) SetCommand(c string) {
-	d.commandLock.Lock()
-	defer d.commandLock.Unlock()
-	d.command = c
-}
-
-// Environment returns the environment variables passed to the container.
-func (d *DockerCommand) Environment() []string {
-	d.envLock.RLock()
-	defer d.envLock.RUnlock()
-	return d.environment
-}
-
-// SetEnvironment sets the environment variables used in the container.
-func (d *DockerCommand) SetEnvironment(e []string) {
-	d.envLock.Lock()
-	defer d.envLock.Unlock()
-	d.environment = e
-}
-
-// ImageID returns the docker image ID for this command.
-func (d *DockerCommand) ImageID() string {
-	d.imageIDLock.RLock()
-	defer d.imageIDLock.RUnlock()
-	return d.imageID
-}
-
 // FormatImageID returns an string image ID from a DockerCommandSettings
 // instance. The returned ID will be in the format 'registry/repository:tag'.
-func FormatImageID(dcs *DockerCommandSettings) string {
-	imageID := dcs.Repository
-	if dcs.Registry != "" {
-		imageID = fmt.Sprintf("%s/%s", dcs.Registry, imageID)
+func FormatImageID(repo string, registry string, tag string) string {
+	imageID := repo
+	if registry != "" {
+		imageID = fmt.Sprintf("%s/%s", registry, imageID)
 	}
-	if dcs.Tag != "" {
-		imageID = fmt.Sprintf("%s:%s", imageID, dcs.Tag)
+	if tag != "" {
+		imageID = fmt.Sprintf("%s:%s", imageID, tag)
 	}
 	return imageID
-}
-
-// SetImageID sets the image ID that will be used to start up the container.
-func (d *DockerCommand) SetImageID(dcs *DockerCommandSettings) {
-	d.imageIDLock.Lock()
-	defer d.imageIDLock.Unlock()
-	d.imageID = FormatImageID(dcs)
-}
-
-// UUID returns the UUID for the DockerCommand as a string. This is NOT the same
-// as the UUID returned by Docker when a container is started.
-func (d *DockerCommand) UUID() string {
-	d.uuidLock.RLock()
-	defer d.uuidLock.RUnlock()
-	return d.uuid
-}
-
-// SetUUID sets the jobrunner assigned UUID for this command.
-func (d *DockerCommand) SetUUID(u string) {
-	d.uuidLock.Lock()
-	defer d.uuidLock.Unlock()
-	d.uuid = u
-}
-
-// SetWorkingDir sets the working directory for the DockerCommand.
-func (d *DockerCommand) SetWorkingDir(w string) {
-	d.workingDirLock.Lock()
-	defer d.workingDirLock.Unlock()
-	d.workingDir = w
-}
-
-// WorkingDir returns the DockerCommand's working directory as a string.
-func (d *DockerCommand) WorkingDir() string {
-	d.workingDirLock.RLock()
-	defer d.workingDirLock.RUnlock()
-	return d.workingDir
-}
-
-// SetExitCode sets the exit code for the DockerCommand.
-func (d *DockerCommand) SetExitCode(e int) {
-	d.exitCodeLock.Lock()
-	defer d.exitCodeLock.Unlock()
-	d.exitCode = e
-}
-
-// ExitCode returns the exit code for a DockerCommand as an int.
-func (d *DockerCommand) ExitCode() int {
-	d.exitCodeLock.RLock()
-	defer d.exitCodeLock.RUnlock()
-	return d.exitCode
 }
 
 // MonitorState tracks the current state of the container.
@@ -786,24 +666,9 @@ func (d *DockerCommand) MonitorState() {
 	return
 }
 
-// SetJSONCmd sets the jsonify.JSONCmd associated with this Command.
-func (d *DockerCommand) SetJSONCmd(c *jsonify.JSONCmd) {
-	d.jsonCmdLock.Lock()
-	defer d.jsonCmdLock.Unlock()
-	d.jsonCmd = c
-}
-
-// JSONCmd returns the jsonify.JSONCmd associated with this Command.
-func (d *DockerCommand) JSONCmd() *jsonify.JSONCmd {
-	d.jsonCmdLock.RLock()
-	defer d.jsonCmdLock.RUnlock()
-	return d.jsonCmd
-}
-
 // Wait blocks until the container that DockerCommand tracks finishes executing.
 func (d *DockerCommand) Wait() error {
-	ptr := d.CmdPtr()
-	err := ptr.Wait()
+	err := d.Cmd.Wait()
 	if err != nil {
 		log.Printf(err.Error())
 	}
@@ -813,7 +678,7 @@ func (d *DockerCommand) Wait() error {
 // VolumesSetting returns a []string containing the settings for volumes that get
 // passed to docker.
 func (d *DockerCommand) VolumesSetting() []string {
-	return []string{"-v", fmt.Sprintf("%s:/data", d.WorkingDir())}
+	return []string{"-v", fmt.Sprintf("%s:/data", d.WorkingDir)}
 }
 
 // Start spins up the DockerCommand. Make sure the image ID and working directory have
@@ -823,7 +688,7 @@ func (d *DockerCommand) Start() error {
 	for _, v := range d.VolumesSetting() {
 		args = append(args, v)
 	}
-	for _, e := range d.Environment() {
+	for _, e := range d.Environment {
 		if e != "" {
 			args = append(args, "--env")
 			args = append(args, e)
@@ -833,83 +698,55 @@ func (d *DockerCommand) Start() error {
 	args = append(args, "stdout")
 	args = append(args, "-a")
 	args = append(args, "stderr")
-	args = append(args, d.ImageID())
-	for _, c := range strings.Split(d.Command(), " ") {
+	args = append(args, d.ImageID)
+	for _, c := range strings.Split(d.Command, " ") {
 		args = append(args, c)
 	}
-	stdoutFile, err := os.Create(path.Join(d.WorkingDir(), d.UUID()+".stdout"))
+	stdoutFile, err := os.Create(path.Join(d.WorkingDir, d.UUID+".stdout"))
 	if err != nil {
 		log.Printf(err.Error())
 		return err
 	}
-	stderrFile, err := os.Create(path.Join(d.WorkingDir(), d.UUID()+".stderr"))
+	stderrFile, err := os.Create(path.Join(d.WorkingDir, d.UUID+".stderr"))
 	if err != nil {
 		log.Printf(err.Error())
 		return err
 	}
-	cmd := exec.Command("docker", args...)
-	d.SetCmdPtr(cmd)
-	cmd.Stdout = stdoutFile
-	cmd.Stderr = stderrFile
-	err = cmd.Start()
+	d.Cmd = exec.Command("docker", args...)
+	d.Cmd.Stdout = stdoutFile
+	d.Cmd.Stderr = stderrFile
+	err = d.Cmd.Start()
 	return err
-}
-
-// DockerCommandSettings contains configuration settings for a DockerCommand
-// instance. Used for in the Prepare() function.
-type DockerCommandSettings struct {
-	Repository  string
-	Registry    string
-	Tag         string
-	Command     string
-	Environment map[string]string
-	WorkingDir  string
 }
 
 // Setup sets the working directory and calls Prepare()
 func (d *DockerCommand) Setup(workingDir string) error {
-	c := d.JSONCmd()
-	if c.WorkingDir != "" {
-		d.SetWorkingDir(path.Join(workingDir, c.WorkingDir))
+	if d.JSONCmd.WorkingDir != "" {
+		d.WorkingDir = path.Join(workingDir, d.JSONCmd.WorkingDir)
 	} else {
-		d.SetWorkingDir(workingDir)
+		d.WorkingDir = workingDir
 	}
-	settings := DockerCommandSettings{
-		Command:     c.CommandLine,
-		Environment: c.Environment,
-		WorkingDir:  d.WorkingDir(),
-		Repository:  c.Repository,
-		Registry:    c.Registry,
-		Tag:         c.Tag,
-	}
-	err := d.Prepare(settings)
+	d.ImageID = FormatImageID(
+		d.JSONCmd.Repository,
+		d.JSONCmd.Registry,
+		d.JSONCmd.Tag,
+	)
+	d.Command = d.JSONCmd.CommandLine
+	d.Environment = formatEnv(d.JSONCmd.Environment)
+	d.Repository = d.JSONCmd.Repository
+	d.Registry = d.JSONCmd.Registry
+	d.Tag = d.JSONCmd.Tag
+	pullStdout, err := os.Create(path.Join(d.WorkingDir, "docker-pull.stdout"))
 	if err != nil {
+		log.Println(err.Error())
 		return err
 	}
-	return err
-}
-
-// Prepare will Pull the Docker image and parse out the environment variables
-// into a format that Docker can use. The parameter should be an instance of
-// DockerCommandSettings.
-func (d *DockerCommand) Prepare(dcs interface{}) error {
-	settings := dcs.(DockerCommandSettings)
-	d.SetImageID(&settings)
-	d.SetWorkingDir(settings.WorkingDir)
-	d.SetCommand(settings.Command)
-	d.SetEnvironment(formatEnv(settings.Environment))
-	d.repository = settings.Repository
-	d.registry = settings.Registry
-	d.tag = settings.Tag
-	pullStdout, err := os.Create(path.Join(d.WorkingDir(), "docker-pull.stdout"))
+	pullStderr, err := os.Create(path.Join(d.WorkingDir, "docker-pull.stderr"))
 	if err != nil {
+		log.Println(err.Error())
 		return err
 	}
-	pullStderr, err := os.Create(path.Join(d.WorkingDir(), "docker-pull.stderr"))
-	if err != nil {
-		return err
-	}
-	pullCmd := exec.Command("docker", "pull", d.ImageID())
+	pullCmd := exec.Command("docker", "pull", d.ImageID)
 	pullCmd.Stdout = pullStdout
 	pullCmd.Stderr = pullStderr
 	err = pullCmd.Run()
@@ -918,10 +755,17 @@ func (d *DockerCommand) Prepare(dcs interface{}) error {
 
 // Kill will stop the container.
 func (d *DockerCommand) Kill() error {
-	d.dockerUUIDLock.RLock()
-	defer d.dockerUUIDLock.RUnlock()
-	killOpts := docker.KillContainerOptions{
-		ID: d.dockerUUID,
+	killStdout, err := os.Create(path.Join(d.WorkingDir, "docker-kill.stdout"))
+	if err != nil {
+		return nil
 	}
-	return d.client.KillContainer(killOpts)
+	killStderr, err := os.Create(path.Join(d.WorkingDir, "docker-kill.stderr"))
+	if err != nil {
+		return nil
+	}
+	killCmd := exec.Command("docker", "kill", d.DockerUUID)
+	killCmd.Stdout = killStdout
+	killCmd.Stderr = killStderr
+	err = killCmd.Run()
+	return err
 }

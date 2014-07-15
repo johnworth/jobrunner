@@ -152,7 +152,9 @@ func (e *Executor) Execute(msg *jsonify.StartMsg) (string, []string, error) {
 		//user specified working directory
 		workingDir = path.Join(cfg.BaseDir, msg.WorkingDir)
 	}
+	fmt.Println(workingDir)
 	job.SetWorkingDir(workingDir)
+	fmt.Println(job.WorkingDir())
 
 	//Make sure the job is prepared. In other words, create the working dir.
 	err := job.Prepare()
@@ -163,29 +165,35 @@ func (e *Executor) Execute(msg *jsonify.StartMsg) (string, []string, error) {
 	//Add commands to the job
 	for _, c := range msg.Commands {
 		var command jobs.JobCommand
-		log.Printf("Handling command of type %s\n", c.Kind)
+		var UUID string
 		switch c.Kind {
 		case "bash":
-			command = jobs.NewBashCommand()
+			b := jobs.NewBashCommand(&c)
+			UUID = b.UUID()
+			command = b
 		case "docker":
-			command = jobs.NewDockerCommand(e.Docker)
+			d := jobs.NewDockerCommand(e.Docker, &c)
+			UUID = d.UUID
+			command = d
 		default:
 			return "", nil, fmt.Errorf("Unknown command type '%s'", c.Kind)
 		}
 		if err != nil {
 			return "", nil, err
 		}
-		command.SetJSONCmd(&c)
 		job.AddCommand(command)
-		commandIDs = append(commandIDs, command.UUID())
+		commandIDs = append(commandIDs, UUID)
 	}
 	e.Registry.Register(job)
-	go func() {
+	go func(job *jobs.Job) {
 		for _, cmd := range job.Commands() {
-			cmd.Setup(workingDir)
+			err = cmd.Setup(job.WorkingDir())
+			if err != nil {
+				log.Println(err.Error())
+			}
 		}
 		job.Run()
-	}()
+	}(job)
 	return job.UUID(), commandIDs, err
 }
 

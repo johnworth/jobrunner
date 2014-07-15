@@ -20,14 +20,14 @@ func TestExitCode(t *testing.T) {
 }
 
 func TestJobKilled(t *testing.T) {
-	j := NewBashCommand()
+	j := NewBashCommand(nil)
 	if j.Killed() {
 		t.Fail()
 	}
 }
 
 func TestJobSetKilled(t *testing.T) {
-	j := NewBashCommand()
+	j := NewBashCommand(nil)
 	j.SetKilled(true)
 	if !j.Killed() {
 		t.Fail()
@@ -35,14 +35,14 @@ func TestJobSetKilled(t *testing.T) {
 }
 
 func TestGetExitCode(t *testing.T) {
-	j := NewBashCommand()
+	j := NewBashCommand(nil)
 	if j.ExitCode() != -9000 {
 		t.Fail()
 	}
 }
 
 func TestSetExitCode(t *testing.T) {
-	j := NewBashCommand()
+	j := NewBashCommand(nil)
 	j.SetExitCode(1)
 	if j.ExitCode() != 1 {
 		t.Fail()
@@ -50,14 +50,14 @@ func TestSetExitCode(t *testing.T) {
 }
 
 func TestCmdPtr(t *testing.T) {
-	j := NewBashCommand()
+	j := NewBashCommand(nil)
 	if j.CmdPtr() != nil {
 		t.Fail()
 	}
 }
 
 func TestSetCmdPtr(t *testing.T) {
-	j := NewBashCommand()
+	j := NewBashCommand(nil)
 	c := exec.Command("echo", "true")
 	j.SetCmdPtr(c)
 	if j.CmdPtr() != c {
@@ -66,7 +66,7 @@ func TestSetCmdPtr(t *testing.T) {
 }
 
 func TestUUID(t *testing.T) {
-	j := NewBashCommand()
+	j := NewBashCommand(nil)
 	fmt.Println(j.UUID())
 	if j.UUID() == "" {
 		t.Fail()
@@ -74,7 +74,7 @@ func TestUUID(t *testing.T) {
 }
 
 func TestSetUUID(t *testing.T) {
-	j := NewBashCommand()
+	j := NewBashCommand(nil)
 	u := uuid.New()
 	j.SetUUID(u)
 	if j.UUID() != u {
@@ -83,7 +83,7 @@ func TestSetUUID(t *testing.T) {
 }
 
 func TestPrepare(t *testing.T) {
-	j := NewBashCommand()
+	j := NewBashCommand(nil)
 	j.SetWorkingDir("/tmp/jobrunnerTestPrepare")
 	defer os.RemoveAll("/tmp/jobrunnerTestPrepare")
 	var c string
@@ -113,7 +113,7 @@ func TestPrepare(t *testing.T) {
 
 func TestJobStart(t *testing.T) {
 	j := NewJob()
-	b := NewBashCommand()
+	b := NewBashCommand(nil)
 	b.SetWorkingDir("/tmp/testJobStart")
 	defer os.RemoveAll("/tmp/testJobStart")
 	j.AddCommand(b)
@@ -131,7 +131,7 @@ func TestJobStart(t *testing.T) {
 
 func TestMonitorState1(t *testing.T) {
 	j := NewJob()
-	b := NewBashCommand()
+	b := NewBashCommand(nil)
 	b.SetWorkingDir("/tmp/testMonitorState")
 	defer os.RemoveAll("/tmp/testMonitorState")
 	j.AddCommand(b)
@@ -150,7 +150,7 @@ func TestMonitorState1(t *testing.T) {
 
 func TestJobWait(t *testing.T) {
 	j := NewJob()
-	b := NewBashCommand()
+	b := NewBashCommand(nil)
 	b.SetWorkingDir("/tmp/testJobWait")
 	defer os.RemoveAll("/tmp/testJobWait")
 	j.AddCommand(b)
