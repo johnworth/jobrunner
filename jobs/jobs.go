@@ -113,7 +113,8 @@ func (j *Job) Commands() []JobCommand {
 func (j *Job) AddCommand(c JobCommand) {
 	j.commandsLock.Lock()
 	defer j.commandsLock.Unlock()
-	j.commands = append(j.commands, c)
+	copyCommand := c
+	j.commands = append(j.commands, copyCommand)
 }
 
 // Current returns the UUID of the current running command.
@@ -220,11 +221,11 @@ type BashCommand struct {
 }
 
 // NewBashCommand returns a pointer to a new instance of BashCommand.
-func NewBashCommand(jcmd *jsonify.JSONCmd) *BashCommand {
+func NewBashCommand(jcmd jsonify.JSONCmd) *BashCommand {
 	newUUID := uuid.New()
 	j := &BashCommand{
 		command:        make(chan string),
-		jsonCmd:        jcmd,
+		jsonCmd:        &jcmd,
 		jsonCmdLock:    &sync.RWMutex{},
 		done:           make(chan error),
 		abort:          make(chan int),
@@ -520,11 +521,11 @@ type DockerCommand struct {
 }
 
 // NewDockerCommand accepts a pointer to a docker Client
-func NewDockerCommand(client *docker.Client, jcmd *jsonify.JSONCmd) *DockerCommand {
+func NewDockerCommand(client *docker.Client, jcmd jsonify.JSONCmd) *DockerCommand {
 	uuid := uuid.New()
 	dc := &DockerCommand{
 		Client:      client,
-		JSONCmd:     jcmd,
+		JSONCmd:     &jcmd,
 		Command:     "",
 		ImageID:     "",
 		DockerUUID:  "",
@@ -567,10 +568,12 @@ func (d *DockerCommand) MonitorState() {
 
 // Wait blocks until the container that DockerCommand tracks finishes executing.
 func (d *DockerCommand) Wait() error {
+	fmt.Printf("Waiting for command %s\n", d.UUID)
 	err := d.Cmd.Wait()
 	if err != nil {
 		log.Printf(err.Error())
 	}
+	fmt.Printf("Done waiting for command %s\n", d.UUID)
 	return err
 }
 
@@ -580,12 +583,21 @@ func (d *DockerCommand) VolumesSetting() []string {
 	return []string{"-v", fmt.Sprintf("%s:/data", d.WorkingDir)}
 }
 
-// Start spins up the DockerCommand. Make sure the image ID and working directory have
-// already been set.
+// WorkingDirSetting returns a []string containing the settings for the working
+// directory inside a container.
+func (d *DockerCommand) WorkingDirSetting() []string {
+	return []string{"-w", "/data"}
+}
+
+// Start spins up the DockerCommand. Make sure the image ID and working
+// directory have already been set.
 func (d *DockerCommand) Start() error {
 	args := []string{"run", "-i", "-t"}
 	for _, v := range d.VolumesSetting() {
 		args = append(args, v)
+	}
+	for _, w := range d.WorkingDirSetting() {
+		args = append(args, w)
 	}
 	for _, e := range d.Environment {
 		if e != "" {
@@ -614,6 +626,7 @@ func (d *DockerCommand) Start() error {
 	d.Cmd = exec.Command("docker", args...)
 	d.Cmd.Stdout = stdoutFile
 	d.Cmd.Stderr = stderrFile
+	log.Printf("Docker command for %s: %s\n", d.UUID, strings.Join(d.Cmd.Args, " "))
 	err = d.Cmd.Start()
 	return err
 }
@@ -645,6 +658,7 @@ func (d *DockerCommand) Setup(workingDir string) error {
 		log.Println(err.Error())
 		return err
 	}
+	log.Printf("Pulling docker image %s for command %s", d.ImageID, d.UUID)
 	pullCmd := exec.Command("docker", "pull", d.ImageID)
 	pullCmd.Stdout = pullStdout
 	pullCmd.Stderr = pullStderr

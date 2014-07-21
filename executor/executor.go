@@ -152,9 +152,8 @@ func (e *Executor) Execute(msg *jsonify.StartMsg) (string, []string, error) {
 		//user specified working directory
 		workingDir = path.Join(cfg.BaseDir, msg.WorkingDir)
 	}
-	fmt.Println(workingDir)
 	job.SetWorkingDir(workingDir)
-	fmt.Println(job.WorkingDir())
+	log.Printf("Working directory for %s is %s\n", job.UUID(), workingDir)
 
 	//Make sure the job is prepared. In other words, create the working dir.
 	err := job.Prepare()
@@ -168,11 +167,11 @@ func (e *Executor) Execute(msg *jsonify.StartMsg) (string, []string, error) {
 		var UUID string
 		switch c.Kind {
 		case "bash":
-			b := jobs.NewBashCommand(&c)
+			b := jobs.NewBashCommand(c)
 			UUID = b.UUID()
 			command = b
 		case "docker":
-			d := jobs.NewDockerCommand(e.Docker, &c)
+			d := jobs.NewDockerCommand(e.Docker, c)
 			UUID = d.UUID
 			command = d
 		default:
@@ -183,6 +182,11 @@ func (e *Executor) Execute(msg *jsonify.StartMsg) (string, []string, error) {
 		}
 		job.AddCommand(command)
 		commandIDs = append(commandIDs, UUID)
+		fmt.Printf("Added command %s to job %s\n", UUID, job.UUID())
+		fmt.Printf("Command line for %s is %s\n", UUID, c.CommandLine)
+	}
+	for _, c := range job.Commands() {
+		fmt.Println(c)
 	}
 	e.Registry.Register(job)
 	go func(job *jobs.Job) {
