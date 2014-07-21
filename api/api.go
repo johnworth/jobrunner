@@ -7,13 +7,11 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"path"
 	"runtime"
 
 	"github.com/gorilla/mux"
 	"github.com/johnworth/jobrunner/config"
 	"github.com/johnworth/jobrunner/executor"
-	"github.com/johnworth/jobrunner/filesystem"
 	"github.com/johnworth/jobrunner/jsonify"
 )
 
@@ -140,30 +138,6 @@ func (h *APIHandlers) List(resp http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(resp, string(jobs[:]))
 }
 
-// DirectoryListing returns a JSON listing of a jobs working directory.
-func (h *APIHandlers) DirectoryListing(resp http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	ID := vars["ID"]
-	jobRegistry := h.Executor.Registry
-	if !jobRegistry.HasKey(ID) {
-		http.Error(resp, fmt.Sprintf("Job %s not found.", ID), 404)
-		return
-	}
-	job := jobRegistry.Get(ID)
-	listing, err := filesystem.ListDir(job.WorkingDir())
-	if err != nil {
-		http.Error(resp, err.Error(), 500)
-		return
-	}
-
-	jsonListing, err := json.Marshal(listing)
-	if err != nil {
-		http.Error(resp, err.Error(), 500)
-		return
-	}
-	fmt.Fprintf(resp, string(jsonListing[:]))
-}
-
 // Kill kills a running job.
 func (h *APIHandlers) Kill(resp http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
@@ -188,64 +162,11 @@ func (h *APIHandlers) Clean(resp http.ResponseWriter, r *http.Request) {
 	h.Executor.Clean(job)
 }
 
-// PathResolve will trigger a download or a directory listing for a path inside
-// the working directory of a job.
-func (h *APIHandlers) PathResolve(resp http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	ID := vars["ID"]
-	fpath := vars["path"]
-	if !h.Executor.Registry.HasKey(ID) {
-		http.Error(resp, fmt.Sprintf("Job %s not found", ID), 404)
-		return
-	}
-	job := h.Executor.Registry.Get(ID)
-	pathExists, err := job.PathExists(fpath)
-	if err != nil {
-		http.Error(resp, err.Error(), 500)
-	}
-	if !pathExists {
-		http.Error(resp, fmt.Sprintf("%s not found for job %s", fpath, ID), 404)
-		return
-	}
-	dircheck, err := job.IsDir(fpath)
-	if err != nil {
-		http.Error(resp, err.Error(), 500)
-	}
-	if !dircheck {
-		fileToReturn, err := job.FilePathResolve(fpath)
-		if err != nil {
-			http.Error(resp, err.Error(), 500)
-			return
-		}
-		name := path.Base(fpath)
-		fpathStat, err := fileToReturn.Stat()
-		if err != nil {
-			http.Error(resp, err.Error(), 500)
-			return
-		}
-		modTime := fpathStat.ModTime()
-		http.ServeContent(resp, r, name, modTime, fileToReturn)
-	} else {
-		listing, err := job.DirPathResolve(fpath)
-		if err != nil {
-			http.Error(resp, err.Error(), 500)
-			return
-		}
-		retval, err := json.Marshal(listing)
-		if err != nil {
-			http.Error(resp, err.Error(), 500)
-		}
-		resp.Write(retval)
-	}
-}
-
 // SetupRouter uses Gorilla's mux project to set up a router and returns it.
 func (h *APIHandlers) SetupRouter() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/", h.Start).Methods("POST")
 	r.HandleFunc("/", h.List).Methods("GET")
-	r.HandleFunc("/{ID}/directory", h.DirectoryListing).Methods("GET")
-	r.HandleFunc("/{ID}/directory/{path:.*}", h.PathResolve).Methods("GET")
 	r.HandleFunc("/{ID}/clean", h.Clean).Methods("POST")
 	r.HandleFunc("/{ID}", h.Kill).Methods("DELETE")
 	return r

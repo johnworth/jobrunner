@@ -6,7 +6,6 @@ all:
 test:
 	go test ./api
 	go test ./executor
-	go test ./filesystem
 	go test ./jobs
 	go test ./config
 
